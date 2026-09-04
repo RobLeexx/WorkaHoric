@@ -13,6 +13,7 @@ export type MainLayoutProps = {
   showHeader?: boolean;
   children?: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  scrollEnabled?: boolean;
 };
 
 export function MainLayout({
@@ -21,6 +22,7 @@ export function MainLayout({
   showHeader = true,
   children,
   contentContainerStyle,
+  scrollEnabled = true,
 }: MainLayoutProps) {
   const theme = useAppTheme();
   const { setHeaderCompact } = useAppContext();
@@ -60,6 +62,7 @@ export function MainLayout({
           contentContainerStyle,
         ]}
         onScroll={handleScroll}
+        scrollEnabled={scrollEnabled}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
       >

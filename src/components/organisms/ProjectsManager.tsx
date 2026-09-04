@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Image, Linking, Modal, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Image, Linking, Modal, Pressable, StyleSheet, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 
 import { useAppContext } from '@/context';
@@ -24,7 +24,7 @@ import type {
   WeeklyEstimation,
 } from '@/types';
 import { useAppTheme } from '@/theme';
-import { formatCurrency, formatDate, fromDateKey, hasWeeklyEstimation, parseDecimalInput, toDateKey, validateDebtProject } from '@/utils';
+import { deriveDebtPlan, formatCurrency, formatDate, fromDateKey, hasWeeklyEstimation, parseDecimalInput, toDateKey, validateDebtProject } from '@/utils';
 
 import { AppButton } from '../atoms/AppButton';
 import { AppInput } from '../atoms/AppInput';
@@ -188,13 +188,11 @@ type DebtFormValues = {
   creditorType: CreditorType;
   creditorName: string;
   principalAmount: string;
-  finalAmount: string;
   interestRate: string;
   paymentFrequency: PaymentFrequency;
   manualPayment: boolean;
   installmentCount: string;
-  installmentAmount: string;
-  endDate: string;
+  paymentStartDate: string;
   notes: string;
   status: DebtStatus;
 };
@@ -205,13 +203,11 @@ function createEmptyDebtValues(date: string): DebtFormValues {
     creditorType: 'company',
     creditorName: '',
     principalAmount: '',
-    finalAmount: '',
-    interestRate: '',
+    interestRate: '0',
     paymentFrequency: 'monthly',
     manualPayment: false,
     installmentCount: '',
-    installmentAmount: '',
-    endDate: date,
+    paymentStartDate: date,
     notes: '',
     status: 'active',
   };
@@ -222,6 +218,11 @@ function parseOptionalDecimal(value: string) {
 }
 
 function buildDebtInput(name: string, currency: CurrencyCode, startDate: string, color: ProjectColor | null, values: DebtFormValues): CreateDebtProjectInput {
+  const principalAmount = parseDecimalInput(values.principalAmount) ?? Number.NaN;
+  const interestRate = parseOptionalDecimal(values.interestRate);
+  const installmentCount = values.installmentCount.trim() ? Number(values.installmentCount) : undefined;
+  const plan = deriveDebtPlan(principalAmount, interestRate, installmentCount, values.paymentFrequency, values.paymentStartDate);
+
   return {
     projectKind: 'debt',
     name,
@@ -231,14 +232,15 @@ function buildDebtInput(name: string, currency: CurrencyCode, startDate: string,
     debtType: values.debtType,
     creditorType: values.creditorType,
     creditorName: values.creditorName,
-    principalAmount: parseDecimalInput(values.principalAmount) ?? Number.NaN,
-    finalAmount: parseDecimalInput(values.finalAmount) ?? Number.NaN,
-    interestRate: parseOptionalDecimal(values.interestRate),
+    principalAmount,
+    finalAmount: plan.finalAmount,
+    interestRate,
     paymentFrequency: values.paymentFrequency,
     manualPayment: values.manualPayment,
-    installmentCount: values.installmentCount.trim() ? Number(values.installmentCount) : undefined,
-    installmentAmount: parseOptionalDecimal(values.installmentAmount),
-    endDate: values.endDate,
+    installmentCount,
+    installmentAmount: plan.installmentAmount,
+    paymentStartDate: values.paymentStartDate,
+    endDate: plan.endDate,
     notes: values.notes.trim() || undefined,
     status: values.status,
   };
@@ -989,24 +991,22 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
               </View>
               <View style={styles.estimationField}>
                 <AppText variant="bodySmall" color="muted">
-                  {t('projects.finalAmount')}
+                  {t('projects.interestRate')}
                 </AppText>
                 <AppInput
                   keyboardType="decimal-pad"
-                  value={debtValues.finalAmount}
-                  onChangeText={(finalAmount) => setDebtValues((current) => ({ ...current, finalAmount }))}
+                  value={debtValues.interestRate}
+                  onChangeText={(interestRate) => setDebtValues((current) => ({ ...current, interestRate }))}
                 />
               </View>
             </View>
             <View style={styles.fieldBlock}>
               <AppText variant="bodySmall" color="muted">
-                {t('projects.interestRate')}
+                {t('projects.finalAmount')}
               </AppText>
               <AppInput
-                keyboardType="decimal-pad"
-                placeholder={t('projects.optional')}
-                value={debtValues.interestRate}
-                onChangeText={(interestRate) => setDebtValues((current) => ({ ...current, interestRate }))}
+                editable={false}
+                value={Number.isFinite(debtInput.finalAmount) ? String(debtInput.finalAmount) : ''}
               />
             </View>
 
@@ -1017,12 +1017,29 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
               options={PAYMENT_FREQUENCIES}
               onChange={(paymentFrequency) => setDebtValues((current) => ({ ...current, paymentFrequency }))}
             />
-            <View style={styles.fieldBlock}>
-              <AppText variant="bodySmall" color="muted">
-                {t('projects.manualPayment')}
-              </AppText>
-              <Switch value={debtValues.manualPayment} onValueChange={(manualPayment) => setDebtValues((current) => ({ ...current, manualPayment }))} />
-            </View>
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: debtValues.manualPayment }}
+              onPress={() => setDebtValues((current) => ({ ...current, manualPayment: !current.manualPayment }))}
+              style={styles.checkboxRow}
+            >
+              <View
+                style={[
+                  styles.checkbox,
+                  {
+                    backgroundColor: debtValues.manualPayment ? theme.colors.primary : theme.colors.surfaceMuted,
+                    borderColor: debtValues.manualPayment ? theme.colors.primary : theme.colors.borderStrong,
+                  },
+                ]}
+              >
+                {debtValues.manualPayment ? (
+                  <AppText color="inverse" variant="label" weight="bold">
+                    ✓
+                  </AppText>
+                ) : null}
+              </View>
+              <AppText variant="bodySmall">{t('projects.manualPayment')}</AppText>
+            </Pressable>
             <View style={styles.estimationGrid}>
               <View style={styles.estimationField}>
                 <AppText variant="bodySmall" color="muted">
@@ -1040,15 +1057,18 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
                   {t('projects.installmentAmount')}
                 </AppText>
                 <AppInput
-                  keyboardType="decimal-pad"
-                  placeholder={t('projects.optional')}
-                  value={debtValues.installmentAmount}
-                  onChangeText={(installmentAmount) => setDebtValues((current) => ({ ...current, installmentAmount }))}
+                  editable={false}
+                  value={debtInput.installmentAmount === undefined ? '' : String(debtInput.installmentAmount)}
                 />
               </View>
             </View>
             <DateField label={t('projects.startDate')} onChange={setStartDate} value={startDate} />
-            <DateField label={t('projects.dueDate')} value={debtValues.endDate} onChange={(endDate) => setDebtValues((current) => ({ ...current, endDate }))} />
+            <DateField
+              label={t('projects.debtPaymentDate')}
+              value={debtValues.paymentStartDate}
+              onChange={(paymentStartDate) => setDebtValues((current) => ({ ...current, paymentStartDate }))}
+            />
+            <DateField disabled label={t('projects.dueDate')} value={debtInput.endDate} />
 
             <AppText weight="semibold">{t('projects.additional')}</AppText>
             <ChoiceSelector
@@ -1221,13 +1241,11 @@ export function ProjectsManager({ projects, onCreateProject, onUpdateProject, on
                 creditorType: editingProject.creditorType,
                 creditorName: editingProject.creditorName,
                 principalAmount: String(editingProject.principalAmount),
-                finalAmount: String(editingProject.finalAmount),
-                interestRate: editingProject.interestRate === undefined ? '' : String(editingProject.interestRate),
+                interestRate: String(editingProject.interestRate ?? 0),
                 paymentFrequency: editingProject.paymentFrequency,
                 manualPayment: editingProject.manualPayment,
                 installmentCount: editingProject.installmentCount === undefined ? '' : String(editingProject.installmentCount),
-                installmentAmount: editingProject.installmentAmount === undefined ? '' : String(editingProject.installmentAmount),
-                endDate: editingProject.endDate,
+                paymentStartDate: editingProject.paymentStartDate,
                 notes: editingProject.notes ?? '',
                 status: editingProject.status,
               },
@@ -1655,6 +1673,20 @@ const styles = StyleSheet.create({
   },
   fieldBlock: {
     gap: 8,
+  },
+  checkboxRow: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  checkbox: {
+    alignItems: 'center',
+    borderRadius: 4,
+    borderWidth: 1,
+    height: 20,
+    justifyContent: 'center',
+    width: 20,
   },
   typeList: {
     flexDirection: 'row',

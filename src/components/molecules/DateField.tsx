@@ -11,10 +11,11 @@ import { AppText } from '../atoms/AppText';
 export type DateFieldProps = {
   label: string;
   value: string;
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
+  disabled?: boolean;
 };
 
-export function DateField({ label, value, onChange }: DateFieldProps) {
+export function DateField({ label, value, onChange, disabled = false }: DateFieldProps) {
   const { locale } = useAppContext();
   const theme = useAppTheme();
   const [showPicker, setShowPicker] = useState(false);
@@ -27,7 +28,7 @@ export function DateField({ label, value, onChange }: DateFieldProps) {
       return;
     }
 
-    onChange(toDateKey(date));
+    onChange?.(toDateKey(date));
   };
 
   return (
@@ -36,9 +37,11 @@ export function DateField({ label, value, onChange }: DateFieldProps) {
         {label}
       </AppText>
       <Pressable
+        disabled={disabled}
         onPress={() => setShowPicker(true)}
         style={[
           styles.field,
+          disabled ? styles.disabled : null,
           {
             backgroundColor: theme.colors.surfaceMuted,
             borderColor: theme.colors.border,
@@ -64,5 +67,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 14,
     paddingVertical: 12,
+  },
+  disabled: {
+    borderWidth: 0,
+    opacity: 0.7,
   },
 });

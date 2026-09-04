@@ -6,7 +6,7 @@ export type AppInputProps = TextInputProps & {
   hasError?: boolean;
 };
 
-export function AppInput({ hasError = false, style, ...props }: AppInputProps) {
+export function AppInput({ editable = true, hasError = false, style, ...props }: AppInputProps) {
   const theme = useAppTheme();
 
   return (
@@ -20,8 +20,10 @@ export function AppInput({ hasError = false, style, ...props }: AppInputProps) {
           borderColor: hasError ? theme.colors.danger : theme.colors.border,
           color: theme.colors.text,
         },
+        !editable ? styles.readonly : null,
         style,
       ]}
+      editable={editable}
       {...props}
     />
   );
@@ -35,5 +37,8 @@ const styles = StyleSheet.create({
     minHeight: 48,
     paddingHorizontal: 14,
     paddingVertical: 12,
+  },
+  readonly: {
+    borderWidth: 0,
   },
 });

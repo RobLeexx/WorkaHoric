@@ -1,4 +1,4 @@
-import type { CurrencyCode, DebtProject } from '@/types';
+import type { CurrencyCode, DebtProject, PaymentFrequency } from '@/types';
 
 import { addDays, fromDateKey, toDateKey } from './dateHelpers';
 import type { CurrencyTotals } from './earnings';
@@ -32,8 +32,41 @@ function addMonthsFromAnchor(anchor: Date, months: number) {
   return monthStart;
 }
 
+export function deriveDebtPlan(
+  principalAmount: number,
+  interestRate: number | undefined,
+  installmentCount: number | undefined,
+  paymentFrequency: PaymentFrequency,
+  paymentStartDate: string,
+) {
+  const principalCents = Number.isFinite(principalAmount) ? toCents(principalAmount) : Number.NaN;
+  const interest = Number.isFinite(interestRate) && (interestRate ?? 0) >= 0 ? (interestRate ?? 0) : 0;
+  const finalAmountCents = Math.round((principalCents * (100 + interest)) / 100);
+  const hasInstallments = Number.isInteger(installmentCount) && (installmentCount ?? 0) > 0;
+  const lastInstallmentIndex = hasInstallments ? installmentCount! - 1 : 0;
+  const paymentDate = fromDateKey(paymentStartDate);
+  const endDate =
+    paymentFrequency === 'monthly'
+      ? addMonthsFromAnchor(paymentDate, lastInstallmentIndex)
+      : paymentFrequency === 'weekly' || paymentFrequency === 'biweekly'
+        ? addDays(paymentDate, lastInstallmentIndex * (paymentFrequency === 'weekly' ? 7 : 14))
+        : paymentDate;
+
+  return {
+    finalAmount: fromCents(finalAmountCents),
+    installmentAmount: hasInstallments ? fromCents(Math.round(finalAmountCents / installmentCount!)) : undefined,
+    endDate: toDateKey(endDate),
+  };
+}
+
 function getDebtPaymentDates(project: DebtProject) {
-  if (!project.startDate || !project.endDate || project.endDate < project.startDate) {
+  if (
+    !project.startDate ||
+    !project.paymentStartDate ||
+    !project.endDate ||
+    project.paymentStartDate < project.startDate ||
+    project.endDate < project.paymentStartDate
+  ) {
     return [];
   }
 
@@ -45,7 +78,7 @@ function getDebtPaymentDates(project: DebtProject) {
     return [];
   }
 
-  const startDate = fromDateKey(project.startDate);
+  const startDate = fromDateKey(project.paymentStartDate);
   const dates: string[] = [];
   const maxPayments = project.installmentCount ?? Number.POSITIVE_INFINITY;
 

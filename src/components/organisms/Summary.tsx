@@ -37,9 +37,8 @@ export type SummaryProps = {
 };
 
 type FinancialSummaryItemProps = {
-  label: string;
-  totals: CurrencyTotals;
-  kind: 'income' | 'debt' | 'net';
+  monthlyCashFlow: MonthlyCashFlow;
+  monthName: string;
 };
 
 function formatTotals(value: CurrencyTotals, locale: string) {
@@ -56,33 +55,44 @@ function formatHours(value: number) {
   return Number(value.toFixed(2)).toString();
 }
 
-function FinancialSummaryItem({ label, totals, kind }: FinancialSummaryItemProps) {
-  const { locale } = useAppContext();
+function FinancialSummaryItem({ monthlyCashFlow, monthName }: FinancialSummaryItemProps) {
+  const { locale, t } = useAppContext();
   const theme = useAppTheme();
+  const [kind, setKind] = useState<'net' | 'income' | 'debt'>('net');
+  const totals = kind === 'net' ? monthlyCashFlow.netByCurrency : kind === 'income' ? monthlyCashFlow.incomesByCurrency : monthlyCashFlow.debtsByCurrency;
+  const label = t(`summary.${kind === 'net' ? 'monthProjectionMoney' : kind === 'income' ? 'monthProjectionIncomes' : 'monthProjectionDebts'}`, {
+    month: monthName,
+  });
   const entries = Object.entries(totals) as [string, number][];
 
   return (
     <View style={[styles.item, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-      <AppText variant="bodySmall" color="muted">
-        {label}
-      </AppText>
-      {entries.length === 0 ? (
-        <AppText variant="title" weight="bold">
-          0.00
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setKind((current) => (current === 'net' ? 'income' : current === 'income' ? 'debt' : 'net'))}
+        style={styles.itemContent}
+      >
+        <AppText variant="bodySmall" color="muted">
+          {label}
         </AppText>
-      ) : (
-        entries.map(([currency, amount]) => {
-          const signedAmount = kind === 'debt' ? -amount : amount;
-          const sign = signedAmount > 0 ? '+' : signedAmount < 0 ? '-' : '';
-          const color = signedAmount > 0 ? theme.colors.primary : signedAmount < 0 ? theme.colors.danger : theme.colors.text;
+        {entries.length === 0 ? (
+          <AppText variant="title" weight="bold">
+            0.00
+          </AppText>
+        ) : (
+          entries.map(([currency, amount]) => {
+            const signedAmount = kind === 'debt' ? -amount : amount;
+            const sign = signedAmount > 0 ? '+' : signedAmount < 0 ? '-' : '';
+            const color = signedAmount > 0 ? theme.colors.primary : signedAmount < 0 ? theme.colors.danger : theme.colors.text;
 
-          return (
-            <AppText key={currency} variant="title" weight="bold" style={{ color }}>
-              {sign}{formatCurrency(Math.abs(signedAmount), locale, currency)}
-            </AppText>
-          );
-        })
-      )}
+            return (
+              <AppText key={currency} variant="title" weight="bold" style={{ color }}>
+                {sign}{formatCurrency(Math.abs(signedAmount), locale, currency)}
+              </AppText>
+            );
+          })
+        )}
+      </Pressable>
     </View>
   );
 }
@@ -201,21 +211,7 @@ export function Summary({
           defaultDisplayMode={resolvedDefaultDisplayMode(item.key)}
         />
       ))}
-      <FinancialSummaryItem
-        label={t('summary.monthProjectionIncomes', { month: projectionMonthName })}
-        totals={monthlyCashFlow.incomesByCurrency}
-        kind="income"
-      />
-      <FinancialSummaryItem
-        label={t('summary.monthProjectionDebts', { month: projectionMonthName })}
-        totals={monthlyCashFlow.debtsByCurrency}
-        kind="debt"
-      />
-      <FinancialSummaryItem
-        label={t('summary.monthProjectionMoney', { month: projectionMonthName })}
-        totals={monthlyCashFlow.netByCurrency}
-        kind="net"
-      />
+      <FinancialSummaryItem monthlyCashFlow={monthlyCashFlow} monthName={projectionMonthName} />
     </View>
   );
 }

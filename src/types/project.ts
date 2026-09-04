@@ -67,6 +67,7 @@ export type DebtProject = BaseProject & {
   creditorType: CreditorType;
   creditorName: string;
   principalAmount: number;
+  paymentStartDate: string;
   endDate: string;
   installmentCount?: number;
   paymentFrequency: PaymentFrequency;

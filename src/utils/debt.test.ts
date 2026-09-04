@@ -4,6 +4,7 @@ import test from 'node:test';
 import type { CreateDebtProjectInput, IncomeProject } from '../types';
 import {
   calculateMonthlyCashFlow,
+  deriveDebtPlan,
   getDebtPaymentsForMonth,
   getDebtSchedule,
   getDebtTotalsByCurrency,
@@ -15,8 +16,9 @@ const validDebt: CreateDebtProjectInput = {
   projectKind: 'debt',
   name: 'Car loan',
   currency: 'EUR',
-  startDate: '2026-09-01',
-  endDate: '2027-09-01',
+  startDate: '2026-08-15',
+  paymentStartDate: '2026-09-01',
+  endDate: '2027-08-01',
   debtType: 'financing',
   creditorType: 'company',
   creditorName: 'Example Finance',
@@ -36,6 +38,12 @@ test('validates the debt CRUD business rules', () => {
   assert.equal(validateDebtProject({ ...validDebt, endDate: '2026-08-31' }), 'dateRange');
   assert.equal(validateDebtProject({ ...validDebt, installmentCount: 0 }), 'installmentCount');
   assert.equal(validateDebtProject({ ...validDebt, interestRate: -1 }), 'interestRate');
+
+  assert.deepEqual(deriveDebtPlan(1000, 10, 12, 'monthly', '2026-09-01'), {
+    finalAmount: 1100,
+    installmentAmount: 91.67,
+    endDate: '2027-08-01',
+  });
 
   const debt = { ...validDebt, id: 'debt-1', color: '#0EA5E9' as const, manualPayment: true };
   const schedule = getDebtSchedule(debt);
@@ -61,7 +69,8 @@ test('validates the debt CRUD business rules', () => {
     ...debt,
     id: 'debt-2',
     startDate: '2026-09-01',
-    endDate: '2026-09-30',
+    paymentStartDate: '2026-09-01',
+    endDate: '2026-09-29',
     paymentFrequency: 'weekly' as const,
     installmentCount: 5,
     installmentAmount: 50,
@@ -85,9 +94,10 @@ test('validates the debt CRUD business rules', () => {
     paymentFrequency: 'custom',
     installmentCount: 1,
     installmentAmount: undefined,
+    endDate: debt.paymentStartDate,
   });
   assert.equal(singlePayment.length, 1);
-  assert.equal(singlePayment[0].date, debt.endDate);
+  assert.equal(singlePayment[0].date, debt.paymentStartDate);
   assert.equal(singlePayment[0].amount, debt.finalAmount);
 
   const incomes: IncomeProject[] = [

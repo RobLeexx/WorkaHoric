@@ -34,7 +34,13 @@ export type DebtValidationError =
   | 'interestRate';
 
 export function validateDebtProject(input: CreateDebtProjectInput): DebtValidationError | null {
-  if (!input.name.trim() || !input.creditorName.trim() || !isIsoDateString(input.startDate) || !isIsoDateString(input.endDate)) {
+  if (
+    !input.name.trim() ||
+    !input.creditorName.trim() ||
+    !isIsoDateString(input.startDate) ||
+    !isIsoDateString(input.paymentStartDate) ||
+    !isIsoDateString(input.endDate)
+  ) {
     return 'required';
   }
 
@@ -50,7 +56,7 @@ export function validateDebtProject(input: CreateDebtProjectInput): DebtValidati
     return 'finalAmountTooLow';
   }
 
-  if (input.endDate < input.startDate) {
+  if (input.paymentStartDate < input.startDate || input.endDate < input.paymentStartDate) {
     return 'dateRange';
   }
 

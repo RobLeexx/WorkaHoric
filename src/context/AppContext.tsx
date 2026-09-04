@@ -216,6 +216,7 @@ function normalizeProject(project: StoredProject): Project {
       creditorType: project.creditorType ?? 'company',
       creditorName: project.creditorName?.trim() ?? '',
       principalAmount: roundToTwoDecimals(Number(project.principalAmount ?? 0)),
+      paymentStartDate: project.paymentStartDate?.trim() || normalizedStartDate,
       finalAmount: roundToTwoDecimals(Number(project.finalAmount ?? 0)),
       endDate: project.endDate?.trim() ?? normalizedStartDate,
       installmentCount:
@@ -460,6 +461,7 @@ export function AppProvider({ children }: PropsWithChildren) {
             name: input.name.trim(),
             creditorName: input.creditorName.trim(),
             startDate: input.startDate.trim(),
+            paymentStartDate: input.paymentStartDate.trim(),
             endDate: input.endDate.trim(),
             color: normalizeProjectColor(input.color),
             principalAmount: roundToTwoDecimals(input.principalAmount),

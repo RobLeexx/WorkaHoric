@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useAppContext } from '@/context';
-import type { WorkLog } from '@/types';
+import type { IncomeProject, WorkLog } from '@/types';
 import type { PaymentIndicator } from '@/utils';
 import { useAppTheme } from '@/theme';
 import { formatMonthLabel, getCurrentMonthDays, getWeekdayLabels, toDateKey } from '@/utils';
@@ -15,6 +15,7 @@ export type WorkCalendarProps = {
   visibleMonth: Date;
   holidayDates: string[];
   paymentIndicators: Partial<Record<string, PaymentIndicator[]>>;
+  projects: IncomeProject[];
   workLogs: WorkLog[];
   onSelectDate: (dateKey: string) => void;
   onOpenDate: (dateKey: string) => void;
@@ -27,6 +28,7 @@ export function WorkCalendar({
   visibleMonth,
   holidayDates,
   paymentIndicators,
+  projects,
   workLogs,
   onSelectDate,
   onOpenDate,
@@ -36,8 +38,19 @@ export function WorkCalendar({
   const theme = useAppTheme();
   const monthDays = useMemo(() => getCurrentMonthDays(visibleMonth, weekStart), [visibleMonth, weekStart]);
   const weekdayLabels = useMemo(() => getWeekdayLabels(language, weekStart), [language, weekStart]);
-  const loggedDates = useMemo(() => new Set(workLogs.map((log) => log.date)), [workLogs]);
   const holidayDateSet = useMemo(() => new Set(holidayDates), [holidayDates]);
+  const loggedProjectColorsByDate = useMemo(() => {
+    const projectColors = new Map(projects.map((project) => [project.id, project.color]));
+
+    return workLogs.reduce<Record<string, (string | null)[]>>((colorsByDate, log) => {
+      if (log.hoursWorked <= 0 || !projectColors.has(log.projectId)) {
+        return colorsByDate;
+      }
+
+      (colorsByDate[log.date] ??= []).push(projectColors.get(log.projectId) ?? null);
+      return colorsByDate;
+    }, {});
+  }, [projects, workLogs]);
   const todayKey = useMemo(() => toDateKey(new Date()), []);
   const lastTapRef = useRef<{ dateKey: string; timestamp: number }>({
     dateKey: '',
@@ -112,9 +125,9 @@ export function WorkCalendar({
       <View style={styles.grid}>
         {monthDays.map((day) => {
           const isSelected = day.dateKey === selectedDate;
-          const hasLogs = loggedDates.has(day.dateKey);
           const isHoliday = holidayDateSet.has(day.dateKey);
           const dayPaymentIndicators = paymentIndicators[day.dateKey] ?? [];
+          const loggedProjectColors = loggedProjectColorsByDate[day.dateKey] ?? [];
           const showTodayRing = day.dateKey === todayKey && !isSelected;
           const backgroundColor = isHoliday
             ? isSelected
@@ -143,6 +156,16 @@ export function WorkCalendar({
                   },
                 ]}
               >
+                {loggedProjectColors.length > 0 ? (
+                  <View style={styles.workLogLine}>
+                    {loggedProjectColors.map((color, index) => (
+                      <View
+                        key={`${color}-${index}`}
+                        style={[styles.workLogLineSegment, { backgroundColor: color ?? theme.colors.primary }]}
+                      />
+                    ))}
+                  </View>
+                ) : null}
                 <AppText
                   color={showInverseContent ? 'inverse' : 'text'}
                   weight={isSelected || day.isToday ? 'semibold' : 'regular'}
@@ -156,7 +179,9 @@ export function WorkCalendar({
                     <AppText
                       key={`${indicator.kind}-${indicator.projectId}-${index}`}
                       style={{
-                        color: indicator.color ?? (indicator.kind === 'income' ? theme.colors.primary : theme.colors.danger),
+                        color: isSelected
+                          ? theme.colors.inverse
+                          : indicator.color ?? (indicator.kind === 'income' ? theme.colors.primary : theme.colors.danger),
                         fontSize: 9,
                         lineHeight: 10,
                         opacity: isSelected ? 1 : 0.6,
@@ -166,7 +191,6 @@ export function WorkCalendar({
                       {indicator.kind === 'income' ? '▲' : '▼'}
                     </AppText>
                   ))}
-                  {hasLogs ? <View style={[styles.marker, { backgroundColor: showInverseContent ? theme.colors.inverse : theme.colors.primary }]} /> : null}
                 </View>
               </Pressable>
             </View>
@@ -223,12 +247,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     minHeight: 52,
     justifyContent: 'center',
+    overflow: 'hidden',
     width: '100%',
-  },
-  marker: {
-    borderRadius: 999,
-    height: 6,
-    width: 6,
   },
   markerRow: {
     alignItems: 'center',
@@ -240,5 +260,17 @@ const styles = StyleSheet.create({
     maxWidth: '90%',
     overflow: 'hidden',
     position: 'absolute',
+  },
+  workLogLine: {
+    flexDirection: 'row',
+    height: 3,
+    left: 0,
+    overflow: 'hidden',
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  workLogLineSegment: {
+    flex: 1,
   },
 });

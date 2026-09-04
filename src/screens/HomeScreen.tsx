@@ -190,7 +190,7 @@ export function HomeScreen() {
 
   return (
     <View style={styles.screen}>
-      <MainLayout contentContainerStyle={styles.content} showHeader={false} title={t('header.home')}>
+      <MainLayout contentContainerStyle={styles.content} scrollEnabled={false} showHeader={false} title={t('header.home')}>
         {!isHydrated ? <AppText color="muted">{t('common.loadingSavedData')}</AppText> : null}
 
         <WorkCalendar
@@ -198,6 +198,7 @@ export function HomeScreen() {
           visibleMonth={visibleMonth}
           holidayDates={holidayDates}
           paymentIndicators={paymentIndicators}
+          projects={projects}
           workLogs={workLogs}
           onSelectDate={syncSelectedDate}
           onOpenDate={openDayDetails}
@@ -284,7 +285,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    gap: 16,
+    flexGrow: 1,
+    gap: 12,
   },
   sheetLayer: {
     ...StyleSheet.absoluteFillObject,
