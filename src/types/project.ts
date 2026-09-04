@@ -49,13 +49,13 @@ type BaseProject = {
   projectKind: ProjectKind;
   currency: CurrencyCode;
   startDate: string;
+  color?: ProjectColor | null;
 };
 
 export type IncomeProject = BaseProject & {
   projectKind: 'income';
   hourlyRate: number;
   contractType: ContractType;
-  color?: ProjectColor | null;
   paymentRule?: PaymentRule;
   weeklyEstimation?: WeeklyEstimation;
   contractFile?: ContractFile;
@@ -86,4 +86,8 @@ export type UpdateProjectInput = CreateProjectInput;
 
 export function isIncomeProject(project: Project): project is IncomeProject {
   return project.projectKind === 'income';
+}
+
+export function isDebtProject(project: Project): project is DebtProject {
+  return project.projectKind === 'debt';
 }

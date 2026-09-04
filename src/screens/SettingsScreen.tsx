@@ -144,15 +144,6 @@ export function SettingsScreen() {
                 ]}
                 onChange={(value) => setSummaryDisplayPreference('month', value)}
               />
-              <OptionSelector<SummaryDisplayMode>
-                label={t('summary.monthProjectionHours', { month: t('settings.thisMonth') })}
-                value={summaryDisplayPreferences.projection}
-                options={[
-                  { label: t('settings.homeSummaryHours'), value: 'hours' },
-                  { label: t('settings.homeSummaryEarnings'), value: 'earnings' },
-                ]}
-                onChange={(value) => setSummaryDisplayPreference('projection', value)}
-              />
             </View>
           ) : null}
           <View

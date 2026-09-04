@@ -4,7 +4,8 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { useAppContext } from '@/context';
 import type { IncomeProject, WorkLog } from '@/types';
 import { useAppTheme } from '@/theme';
-import { calculateDailyEarnings, formatCurrency, formatLongDate, isPaydayForProject, parseDecimalInput } from '@/utils';
+import type { DebtPayment } from '@/utils';
+import { calculateDailyEarnings, formatCurrency, formatDate, formatLongDate, fromDateKey, isPaydayForProject, parseDecimalInput } from '@/utils';
 
 import { AppButton } from '../atoms/AppButton';
 import { AppInput } from '../atoms/AppInput';
@@ -22,6 +23,7 @@ type ProjectChipsProps = {
 export type DayDetailsProps = {
   selectedDate: string;
   projects: IncomeProject[];
+  debtPayments: DebtPayment[];
   dayLogs: WorkLog[];
   isHoliday: boolean;
   selectedProjectId: string;
@@ -97,6 +99,7 @@ function ProjectChips({ projects, selectedDate, selectedProjectId, onSelect }: P
 export function DayDetails({
   selectedDate,
   projects,
+  debtPayments,
   dayLogs,
   isHoliday,
   selectedProjectId,
@@ -158,6 +161,47 @@ export function DayDetails({
       <AppText variant="title" weight="bold">
         {formatLongDate(selectedDate, locale)}
       </AppText>
+
+      {debtPayments.length > 0 ? (
+        <View style={styles.debtSection}>
+          <AppText weight="semibold">{t('day.debtPayments')}</AppText>
+          {debtPayments.map((payment) => (
+            <View
+              key={`${payment.projectId}-${payment.installmentNumber}`}
+              style={[
+                styles.debtCard,
+                {
+                  backgroundColor: theme.colors.surfaceMuted,
+                  borderColor: payment.color ?? theme.colors.danger,
+                },
+              ]}
+            >
+              <View style={styles.debtTitleRow}>
+                <AppText weight="semibold">{payment.projectName}</AppText>
+                {payment.manualPayment ? (
+                  <AppText color="danger" variant="label" weight="bold">
+                    {t('day.manualPayment')}
+                  </AppText>
+                ) : null}
+              </View>
+              <AppText color="muted" variant="bodySmall">
+                {t('day.debtCreditor', { name: payment.creditorName })}
+              </AppText>
+              <AppText color="muted" variant="bodySmall">
+                {t('day.debtDue', { amount: formatCurrency(payment.amount, locale, payment.currency) })}
+              </AppText>
+              <AppText color="muted" variant="bodySmall">
+                {t('day.debtPaymentDate', { date: formatDate(fromDateKey(payment.date), locale) })}
+              </AppText>
+              {payment.installmentCount ? (
+                <AppText color="muted" variant="bodySmall">
+                  {t('day.debtInstallment', { current: payment.installmentNumber, total: payment.installmentCount })}
+                </AppText>
+              ) : null}
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       {projects.length === 0 ? (
         <AppText color="muted">{t('day.noProjects')}</AppText>
@@ -237,6 +281,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  debtSection: {
+    gap: 8,
+  },
+  debtCard: {
+    borderLeftWidth: 4,
+    borderRadius: 12,
+    gap: 3,
+    padding: 10,
+  },
+  debtTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
   },
   projectChip: {
     flex: 1,

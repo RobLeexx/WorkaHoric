@@ -221,12 +221,13 @@ function parseOptionalDecimal(value: string) {
   return value.trim() ? (parseDecimalInput(value) ?? Number.NaN) : undefined;
 }
 
-function buildDebtInput(name: string, currency: CurrencyCode, startDate: string, values: DebtFormValues): CreateDebtProjectInput {
+function buildDebtInput(name: string, currency: CurrencyCode, startDate: string, color: ProjectColor | null, values: DebtFormValues): CreateDebtProjectInput {
   return {
     projectKind: 'debt',
     name,
     currency,
     startDate,
+    color,
     debtType: values.debtType,
     creditorType: values.creditorType,
     creditorName: values.creditorName,
@@ -505,7 +506,10 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
   }, EMPTY_WEEKLY_ESTIMATION);
   const hasConfiguredEstimation = Object.values(parsedWeeklyEstimation).some((value) => value > 0);
   const paymentRule = buildPaymentRule(paymentRuleValues);
-  const debtInput = useMemo(() => buildDebtInput(name, currency, startDate, debtValues), [currency, debtValues, name, startDate]);
+  const debtInput = useMemo(
+    () => buildDebtInput(name, currency, startDate, selectedColor, debtValues),
+    [currency, debtValues, name, selectedColor, startDate],
+  );
   const debtValidationError = validateDebtProject(debtInput);
   const canSubmit =
     projectKind === 'income'
@@ -603,6 +607,55 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
     [isDirty, submitForm],
   );
 
+  const colorField = (
+    <View style={styles.fieldBlock}>
+      <AppText variant="bodySmall" color="muted">
+        {t('projects.color')}
+      </AppText>
+      <View style={styles.colorActions}>
+        <Pressable
+          onPress={() => setSelectedColor(null)}
+          style={[
+            styles.colorActionButton,
+            {
+              backgroundColor: theme.colors.surface,
+              borderColor: selectedColor === null ? theme.colors.primary : theme.colors.border,
+            },
+          ]}
+        >
+          <AppText color={selectedColor === null ? 'primary' : 'text'} variant="bodySmall" weight="semibold">
+            {t('projects.noColor')}
+          </AppText>
+        </Pressable>
+        <Pressable
+          onPress={() => setColorSheetOpen(true)}
+          style={[
+            styles.colorActionButton,
+            styles.chooseColorButton,
+            {
+              backgroundColor: theme.colors.surface,
+              borderColor: selectedColor ? theme.colors.primary : theme.colors.border,
+            },
+          ]}
+        >
+          <View style={styles.chooseColorContent}>
+            {selectedColor ? <View style={[styles.selectedColorSwatch, { backgroundColor: selectedColor }]} /> : null}
+            <View style={styles.chooseColorText}>
+              <AppText color={selectedColor ? 'primary' : 'text'} variant="bodySmall" weight="semibold">
+                {selectedColor ? t('projects.chosenColor') : t('projects.chooseColor')}
+              </AppText>
+              {selectedColorOption ? (
+                <AppText color="muted" variant="bodySmall">
+                  {t(selectedColorOption.labelKey)}
+                </AppText>
+              ) : null}
+            </View>
+          </View>
+        </Pressable>
+      </View>
+    </View>
+  );
+
   return (
     <>
       <View
@@ -624,6 +677,7 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
 
         <ChoiceSelector label={t('projects.projectType')} value={projectKind} options={PROJECT_KINDS} onChange={setProjectKind} />
         <AppInput onChangeText={setName} placeholder={t('projects.projectName')} value={name} />
+        {projectKind === 'debt' ? colorField : null}
         {projectKind === 'income' ? (
           <>
             <AppInput
@@ -666,62 +720,7 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
               </View>
             </View>
             <DateField label={t('projects.startDate')} onChange={setStartDate} value={startDate} />
-
-            <View style={styles.fieldBlock}>
-              <AppText variant="bodySmall" color="muted">
-                {t('projects.color')}
-              </AppText>
-              <View style={styles.colorActions}>
-                <Pressable
-                  onPress={() => setSelectedColor(null)}
-                  style={[
-                    styles.colorActionButton,
-                    {
-                      backgroundColor: theme.colors.surface,
-                      borderColor: selectedColor === null ? theme.colors.primary : theme.colors.border,
-                    },
-                  ]}
-                >
-                  <AppText color={selectedColor === null ? 'primary' : 'text'} variant="bodySmall" weight="semibold">
-                    {t('projects.noColor')}
-                  </AppText>
-                </Pressable>
-                <Pressable
-                  onPress={() => setColorSheetOpen(true)}
-                  style={[
-                    styles.colorActionButton,
-                    styles.chooseColorButton,
-                    {
-                      backgroundColor: theme.colors.surface,
-                      borderColor: selectedColor ? theme.colors.primary : theme.colors.border,
-                    },
-                  ]}
-                >
-                  <View style={styles.chooseColorContent}>
-                    {selectedColor ? (
-                      <View
-                        style={[
-                          styles.selectedColorSwatch,
-                          {
-                            backgroundColor: selectedColor,
-                          },
-                        ]}
-                      />
-                    ) : null}
-                    <View style={styles.chooseColorText}>
-                      <AppText color={selectedColor ? 'primary' : 'text'} variant="bodySmall" weight="semibold">
-                        {selectedColor ? t('projects.chosenColor') : t('projects.chooseColor')}
-                      </AppText>
-                      {selectedColorOption ? (
-                        <AppText color="muted" variant="bodySmall">
-                          {t(selectedColorOption.labelKey)}
-                        </AppText>
-                      ) : null}
-                    </View>
-                  </View>
-                </Pressable>
-              </View>
-            </View>
+            {colorField}
 
             <View
               style={[
@@ -1213,7 +1212,7 @@ export function ProjectsManager({ projects, onCreateProject, onUpdateProject, on
               currency: editingProject.currency,
               contractType: 'hourly',
               startDate: editingProject.startDate,
-              color: null,
+              color: editingProject.color,
               paymentRule: undefined,
               weeklyEstimation: undefined,
               contractFile: undefined,

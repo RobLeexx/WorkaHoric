@@ -1,18 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Easing, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AppButton, AppText, DayDetails, MainLayout, Summary, WorkCalendar } from '@/components';
 import { useAppContext } from '@/context';
 import { useProjects, useWorkLogs } from '@/hooks';
 import { useAppTheme } from '@/theme';
-import { addMonths, calculateMonthlyProjection, fromDateKey, getPaydayColorsForMonth, toDateKey } from '@/utils';
+import { isDebtProject } from '@/types';
+import {
+  addMonths,
+  calculateMonthlyCashFlow,
+  calculateMonthlyProjection,
+  fromDateKey,
+  getDebtPaymentsForMonth,
+  getDebtTotalsByCurrency,
+  getPaymentIndicatorsForMonth,
+  toDateKey,
+} from '@/utils';
 
 const SHEET_ANIMATION_DURATION_MS = 220;
 const SHEET_HIDDEN_OFFSET = 520;
 
 export function HomeScreen() {
   const { holidayDates, isHydrated, showToast, t, toggleHoliday } = useAppContext();
-  const { projects } = useProjects();
+  const { projects, managedProjects } = useProjects();
   const theme = useAppTheme();
   const today = useMemo(() => new Date(), []);
   const [selectedDate, setSelectedDate] = useState(toDateKey(today));
@@ -32,12 +42,22 @@ export function HomeScreen() {
     weeklyEarningsByCurrency,
     monthlyEarningsByCurrency,
   } = useWorkLogs(selectedDate);
-  const paydayColors = useMemo(() => getPaydayColorsForMonth(projects, visibleMonth), [projects, visibleMonth]);
+  const debtProjects = useMemo(() => managedProjects.filter(isDebtProject), [managedProjects]);
+  const debtPayments = useMemo(() => getDebtPaymentsForMonth(debtProjects, visibleMonth), [debtProjects, visibleMonth]);
+  const paymentIndicators = useMemo(
+    () => getPaymentIndicatorsForMonth(projects, debtPayments, visibleMonth),
+    [debtPayments, projects, visibleMonth],
+  );
   const projectIds = useMemo(() => new Set(projects.map((project) => project.id)), [projects]);
   const monthlyProjection = useMemo(
     () => calculateMonthlyProjection(projects, workLogs, holidayDates, visibleMonth),
     [holidayDates, projects, visibleMonth, workLogs],
   );
+  const monthlyCashFlow = useMemo(
+    () => calculateMonthlyCashFlow(monthlyProjection.totalProjectedEarningsByCurrency, getDebtTotalsByCurrency(debtPayments)),
+    [debtPayments, monthlyProjection.totalProjectedEarningsByCurrency],
+  );
+  const selectedDebtPayments = useMemo(() => debtPayments.filter((payment) => payment.date === selectedDate), [debtPayments, selectedDate]);
 
   const syncSelectedDate = useCallback((dateKey: string) => {
     setSelectedDate(dateKey);
@@ -177,7 +197,7 @@ export function HomeScreen() {
           selectedDate={selectedDate}
           visibleMonth={visibleMonth}
           holidayDates={holidayDates}
-          paydayColors={paydayColors}
+          paymentIndicators={paymentIndicators}
           workLogs={workLogs}
           onSelectDate={syncSelectedDate}
           onOpenDate={openDayDetails}
@@ -191,8 +211,7 @@ export function HomeScreen() {
           dailyEarnings={dailyEarningsByCurrency}
           weeklyEarnings={weeklyEarningsByCurrency}
           monthlyEarnings={monthlyEarningsByCurrency}
-          monthlyProjectionHours={monthlyProjection.totalProjectedHours}
-          monthlyProjectionEarnings={monthlyProjection.totalProjectedEarningsByCurrency}
+          monthlyCashFlow={monthlyCashFlow}
           projectionMonth={visibleMonth}
         />
       </MainLayout>
@@ -228,32 +247,31 @@ export function HomeScreen() {
                 ]}
               />
             </View>
-            <DayDetails
-              selectedDate={selectedDate}
-              projects={projects}
-              dayLogs={dayLogs}
-              isHoliday={holidayDates.includes(selectedDate)}
-              selectedProjectId={selectedProjectId}
-              onSelectProject={setSelectedProjectId}
-              onSaveHours={handleSaveHours}
-              onClearHours={handleClearHours}
-              onToggleHoliday={handleToggleHoliday}
-            />
-            <View
-              style={[
-                styles.sheetActions,
-                {
-                  backgroundColor: theme.colors.surface,
-                  borderColor: theme.colors.border,
-                },
-              ]}
-            >
-              <AppButton
-                title={t('common.close')}
-                onPress={closeDayDetails}
-                variant="secondary"
+            <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
+              <DayDetails
+                selectedDate={selectedDate}
+                projects={projects}
+                debtPayments={selectedDebtPayments}
+                dayLogs={dayLogs}
+                isHoliday={holidayDates.includes(selectedDate)}
+                selectedProjectId={selectedProjectId}
+                onSelectProject={setSelectedProjectId}
+                onSaveHours={handleSaveHours}
+                onClearHours={handleClearHours}
+                onToggleHoliday={handleToggleHoliday}
               />
-            </View>
+              <View
+                style={[
+                  styles.sheetActions,
+                  {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                  },
+                ]}
+              >
+                <AppButton title={t('common.close')} onPress={closeDayDetails} variant="secondary" />
+              </View>
+            </ScrollView>
           </Animated.View>
         </View>
       ) : null}
@@ -280,8 +298,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15, 23, 42, 0.4)',
   },
   sheetContainer: {
+    maxHeight: '92%',
     padding: 16,
     paddingTop: 8,
+  },
+  sheetContent: {
+    gap: 8,
   },
   sheetHandleWrapper: {
     alignItems: 'center',

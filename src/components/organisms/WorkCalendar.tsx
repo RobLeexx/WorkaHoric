@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useAppContext } from '@/context';
 import type { WorkLog } from '@/types';
+import type { PaymentIndicator } from '@/utils';
 import { useAppTheme } from '@/theme';
 import { formatMonthLabel, getCurrentMonthDays, getWeekdayLabels, toDateKey } from '@/utils';
 
@@ -13,7 +14,7 @@ export type WorkCalendarProps = {
   selectedDate: string;
   visibleMonth: Date;
   holidayDates: string[];
-  paydayColors: Partial<Record<string, string>>;
+  paymentIndicators: Partial<Record<string, PaymentIndicator[]>>;
   workLogs: WorkLog[];
   onSelectDate: (dateKey: string) => void;
   onOpenDate: (dateKey: string) => void;
@@ -21,17 +22,11 @@ export type WorkCalendarProps = {
 };
 
 const DOUBLE_TAP_DELAY_MS = 280;
-const SOFT_PAYDAY_ALPHA = '26';
-
-function withHexOpacity(color: string, alphaHex: string) {
-  return color.length === 7 ? `${color}${alphaHex}` : color;
-}
-
 export function WorkCalendar({
   selectedDate,
   visibleMonth,
   holidayDates,
-  paydayColors,
+  paymentIndicators,
   workLogs,
   onSelectDate,
   onOpenDate,
@@ -119,26 +114,19 @@ export function WorkCalendar({
           const isSelected = day.dateKey === selectedDate;
           const hasLogs = loggedDates.has(day.dateKey);
           const isHoliday = holidayDateSet.has(day.dateKey);
-          const paydayColor = paydayColors[day.dateKey];
-          const isPayday = Boolean(paydayColor);
+          const dayPaymentIndicators = paymentIndicators[day.dateKey] ?? [];
           const showTodayRing = day.dateKey === todayKey && !isSelected;
           const backgroundColor = isHoliday
             ? isSelected
               ? theme.colors.warning
               : theme.colors.warningSoft
-            : isPayday
-              ? isSelected
-                ? paydayColor
-                : withHexOpacity(paydayColor!, SOFT_PAYDAY_ALPHA)
-              : isSelected
-                ? theme.colors.primary
-                : theme.colors.surfaceMuted;
+            : isSelected
+              ? theme.colors.primary
+              : theme.colors.surfaceMuted;
           const dayTextStyle = !isSelected
             ? isHoliday
               ? { color: theme.colors.warning }
-              : isPayday
-                ? { color: paydayColor }
-                : undefined
+              : undefined
             : undefined;
           const showInverseContent = isSelected || isHoliday;
 
@@ -163,20 +151,23 @@ export function WorkCalendar({
                   {day.dayNumber}
                 </AppText>
 
-                <View
-                  style={[
-                    styles.marker,
-                    {
-                      backgroundColor: hasLogs
-                        ? showInverseContent
-                          ? theme.colors.inverse
-                          : isPayday
-                            ? paydayColor
-                          : theme.colors.primary
-                        : 'transparent',
-                    },
-                  ]}
-                />
+                <View style={styles.markerRow}>
+                  {dayPaymentIndicators.map((indicator, index) => (
+                    <AppText
+                      key={`${indicator.kind}-${indicator.projectId}-${index}`}
+                      style={{
+                        color: indicator.color ?? (indicator.kind === 'income' ? theme.colors.primary : theme.colors.danger),
+                        fontSize: 9,
+                        lineHeight: 10,
+                        opacity: isSelected ? 1 : 0.6,
+                      }}
+                      variant="label"
+                    >
+                      {indicator.kind === 'income' ? '▲' : '▼'}
+                    </AppText>
+                  ))}
+                  {hasLogs ? <View style={[styles.marker, { backgroundColor: showInverseContent ? theme.colors.inverse : theme.colors.primary }]} /> : null}
+                </View>
               </Pressable>
             </View>
           );
@@ -230,7 +221,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 14,
     borderWidth: 1,
-    gap: 6,
     minHeight: 52,
     justifyContent: 'center',
     width: '100%',
@@ -239,5 +229,16 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     height: 6,
     width: 6,
+  },
+  markerRow: {
+    alignItems: 'center',
+    bottom: 4,
+    flexDirection: 'row',
+    gap: 1,
+    height: 10,
+    justifyContent: 'center',
+    maxWidth: '90%',
+    overflow: 'hidden',
+    position: 'absolute',
   },
 });

@@ -1,6 +1,7 @@
 import type { IncomeProject, PaymentRule, ProjectColor } from '@/types';
 
 import { addDays, fromDateKey, toDateKey } from './dateHelpers';
+import type { DebtPayment } from './debts';
 
 const BIWEEKLY_INTERVAL_DAYS = 14;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -90,20 +91,27 @@ export function getProjectPaydaysForMonth(project: IncomeProject, selectedMonth:
   return paydays;
 }
 
-export function getPaydayColorsForMonth(projects: IncomeProject[], selectedMonth: Date | string) {
-  const paydayColors: Partial<Record<string, ProjectColor>> = {};
+export type PaymentIndicator = {
+  projectId: string;
+  kind: 'income' | 'debt';
+  color?: ProjectColor | null;
+};
+
+export function getPaymentIndicatorsForMonth(projects: IncomeProject[], debtPayments: DebtPayment[], selectedMonth: Date | string) {
+  const indicators: Partial<Record<string, PaymentIndicator[]>> = {};
 
   projects.forEach((project) => {
-    if (!project.color) {
-      return;
-    }
-
     getProjectPaydaysForMonth(project, selectedMonth).forEach((dateKey) => {
-      if (!paydayColors[dateKey]) {
-        paydayColors[dateKey] = project.color!;
-      }
+      indicators[dateKey] = [...(indicators[dateKey] ?? []), { projectId: project.id, kind: 'income', color: project.color }];
     });
   });
 
-  return paydayColors;
+  debtPayments.forEach((payment) => {
+    indicators[payment.date] = [
+      ...(indicators[payment.date] ?? []),
+      { projectId: payment.projectId, kind: 'debt', color: payment.color },
+    ];
+  });
+
+  return indicators;
 }

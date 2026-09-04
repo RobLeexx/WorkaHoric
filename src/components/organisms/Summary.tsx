@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useAppContext } from '@/context';
-import type { CurrencyTotals } from '@/utils';
+import type { CurrencyTotals, MonthlyCashFlow } from '@/utils';
 import type { SummaryDisplayMode, SummaryMetricKey } from '@/types';
 import { useAppTheme } from '@/theme';
 import { formatCurrency, formatShortMonthName } from '@/utils';
@@ -32,9 +32,14 @@ export type SummaryProps = {
   dailyEarnings: CurrencyTotals;
   weeklyEarnings: CurrencyTotals;
   monthlyEarnings: CurrencyTotals;
-  monthlyProjectionHours: number;
-  monthlyProjectionEarnings: CurrencyTotals;
+  monthlyCashFlow: MonthlyCashFlow;
   projectionMonth: Date;
+};
+
+type FinancialSummaryItemProps = {
+  label: string;
+  totals: CurrencyTotals;
+  kind: 'income' | 'debt' | 'net';
 };
 
 function formatTotals(value: CurrencyTotals, locale: string) {
@@ -49,6 +54,37 @@ function formatTotals(value: CurrencyTotals, locale: string) {
 
 function formatHours(value: number) {
   return Number(value.toFixed(2)).toString();
+}
+
+function FinancialSummaryItem({ label, totals, kind }: FinancialSummaryItemProps) {
+  const { locale } = useAppContext();
+  const theme = useAppTheme();
+  const entries = Object.entries(totals) as [string, number][];
+
+  return (
+    <View style={[styles.item, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+      <AppText variant="bodySmall" color="muted">
+        {label}
+      </AppText>
+      {entries.length === 0 ? (
+        <AppText variant="title" weight="bold">
+          0.00
+        </AppText>
+      ) : (
+        entries.map(([currency, amount]) => {
+          const signedAmount = kind === 'debt' ? -amount : amount;
+          const sign = signedAmount > 0 ? '+' : signedAmount < 0 ? '-' : '';
+          const color = signedAmount > 0 ? theme.colors.primary : signedAmount < 0 ? theme.colors.danger : theme.colors.text;
+
+          return (
+            <AppText key={currency} variant="title" weight="bold" style={{ color }}>
+              {sign}{formatCurrency(Math.abs(signedAmount), locale, currency)}
+            </AppText>
+          );
+        })
+      )}
+    </View>
+  );
 }
 
 function SummaryItem({
@@ -101,8 +137,7 @@ export function Summary({
   dailyEarnings,
   weeklyEarnings,
   monthlyEarnings,
-  monthlyProjectionHours,
-  monthlyProjectionEarnings,
+  monthlyCashFlow,
   projectionMonth,
 }: SummaryProps) {
   const { locale, summaryDisplayPreferences, summaryDisplayPreset, t } = useAppContext();
@@ -130,13 +165,6 @@ export function Summary({
         hoursValue: formatHours(monthlyHours),
         earningsValue: formatTotals(monthlyEarnings, locale),
       },
-      {
-        key: 'projection',
-        hoursLabel: t('summary.monthProjectionHours', { month: projectionMonthName }),
-        earningsLabel: t('summary.monthProjectionEarnings', { month: projectionMonthName }),
-        hoursValue: formatHours(monthlyProjectionHours),
-        earningsValue: formatTotals(monthlyProjectionEarnings, locale),
-      },
     ],
     [
       dailyEarnings,
@@ -144,9 +172,6 @@ export function Summary({
       locale,
       monthlyEarnings,
       monthlyHours,
-      monthlyProjectionEarnings,
-      monthlyProjectionHours,
-      projectionMonthName,
       t,
       weeklyEarnings,
       weeklyHours,
@@ -176,6 +201,21 @@ export function Summary({
           defaultDisplayMode={resolvedDefaultDisplayMode(item.key)}
         />
       ))}
+      <FinancialSummaryItem
+        label={t('summary.monthProjectionIncomes', { month: projectionMonthName })}
+        totals={monthlyCashFlow.incomesByCurrency}
+        kind="income"
+      />
+      <FinancialSummaryItem
+        label={t('summary.monthProjectionDebts', { month: projectionMonthName })}
+        totals={monthlyCashFlow.debtsByCurrency}
+        kind="debt"
+      />
+      <FinancialSummaryItem
+        label={t('summary.monthProjectionMoney', { month: projectionMonthName })}
+        totals={monthlyCashFlow.netByCurrency}
+        kind="net"
+      />
     </View>
   );
 }
