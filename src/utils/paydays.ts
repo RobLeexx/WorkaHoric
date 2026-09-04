@@ -1,4 +1,4 @@
-import type { PaymentRule, Project, ProjectColor } from '@/types';
+import type { IncomeProject, PaymentRule, ProjectColor } from '@/types';
 
 import { addDays, fromDateKey, toDateKey } from './dateHelpers';
 
@@ -9,7 +9,7 @@ function toSafeDate(dateInput: Date | string) {
   return typeof dateInput === 'string' ? fromDateKey(dateInput) : dateInput;
 }
 
-function isActiveProjectDate(project: Project, dateKey: string) {
+function isActiveProjectDate(project: IncomeProject, dateKey: string) {
   return !project.startDate || dateKey >= project.startDate;
 }
 
@@ -60,7 +60,7 @@ function matchesPaymentRule(rule: PaymentRule, targetDate: Date, dateKey: string
   }
 }
 
-export function isPaydayForProject(project: Project, dateInput: Date | string) {
+export function isPaydayForProject(project: IncomeProject, dateInput: Date | string) {
   const { paymentRule } = project;
 
   if (!paymentRule) {
@@ -77,7 +77,7 @@ export function isPaydayForProject(project: Project, dateInput: Date | string) {
   return matchesPaymentRule(paymentRule, targetDate, dateKey);
 }
 
-export function getProjectPaydaysForMonth(project: Project, selectedMonth: Date | string) {
+export function getProjectPaydaysForMonth(project: IncomeProject, selectedMonth: Date | string) {
   const { monthStart, monthEnd } = getMonthRange(selectedMonth);
   const paydays: string[] = [];
 
@@ -90,7 +90,7 @@ export function getProjectPaydaysForMonth(project: Project, selectedMonth: Date 
   return paydays;
 }
 
-export function getPaydayColorsForMonth(projects: Project[], selectedMonth: Date | string) {
+export function getPaydayColorsForMonth(projects: IncomeProject[], selectedMonth: Date | string) {
   const paydayColors: Partial<Record<string, ProjectColor>> = {};
 
   projects.forEach((project) => {

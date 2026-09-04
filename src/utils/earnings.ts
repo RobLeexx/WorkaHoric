@@ -1,11 +1,11 @@
-import type { CurrencyCode, HolidayLike, Project, WeekdayEstimationKey, WorkLog } from '@/types';
+import type { CurrencyCode, HolidayLike, IncomeProject, WeekdayEstimationKey, WorkLog } from '@/types';
 
 import { addDays, fromDateKey, toDateKey } from './dateHelpers';
 
 export type CurrencyTotals = Partial<Record<CurrencyCode, number>>;
-type ProjectMap = Map<string, Project>;
+type ProjectMap = Map<string, IncomeProject>;
 
-export function calculateDailyEarnings(log: WorkLog, project?: Project) {
+export function calculateDailyEarnings(log: WorkLog, project?: IncomeProject) {
   if (!project) {
     return 0;
   }
@@ -13,7 +13,7 @@ export function calculateDailyEarnings(log: WorkLog, project?: Project) {
   return log.hoursWorked * project.hourlyRate;
 }
 
-function createProjectMap(projects: Project[]): ProjectMap {
+function createProjectMap(projects: IncomeProject[]): ProjectMap {
   return new Map(projects.map((project) => [project.id, project]));
 }
 
@@ -27,15 +27,15 @@ export function calculateHoursTotal(logs: WorkLog[]) {
   return logs.reduce((total, log) => total + log.hoursWorked, 0);
 }
 
-export function calculateWeeklyTotal(logs: WorkLog[], projects: Project[]) {
+export function calculateWeeklyTotal(logs: WorkLog[], projects: IncomeProject[]) {
   return calculateLogsEarnings(logs, createProjectMap(projects));
 }
 
-export function calculateMonthlyTotal(logs: WorkLog[], projects: Project[]) {
+export function calculateMonthlyTotal(logs: WorkLog[], projects: IncomeProject[]) {
   return calculateLogsEarnings(logs, createProjectMap(projects));
 }
 
-export function calculateCurrencyTotals(logs: WorkLog[], projects: Project[]): CurrencyTotals {
+export function calculateCurrencyTotals(logs: WorkLog[], projects: IncomeProject[]): CurrencyTotals {
   const projectMap = createProjectMap(projects);
 
   return logs.reduce<CurrencyTotals>((totals, log) => {
@@ -61,7 +61,7 @@ const WEEKDAY_ESTIMATION_KEYS: Record<number, WeekdayEstimationKey> = {
   6: 'satHours',
 };
 
-export function hasWeeklyEstimation(project: Project) {
+export function hasWeeklyEstimation(project: IncomeProject) {
   return Boolean(project.weeklyEstimation) && Object.values(project.weeklyEstimation ?? {}).some((value) => value > 0);
 }
 
@@ -81,7 +81,7 @@ type ProjectionLayerTotals = {
   earningsByCurrency: CurrencyTotals;
 };
 
-function getEstimatedHoursForDate(project: Project, date: Date) {
+function getEstimatedHoursForDate(project: IncomeProject, date: Date) {
   if (!project.weeklyEstimation) {
     return 0;
   }
@@ -91,11 +91,7 @@ function getEstimatedHoursForDate(project: Project, date: Date) {
 }
 
 function toHolidayDateSet(holidays: HolidayLike[]) {
-  return new Set(
-    holidays
-      .map((holiday) => (typeof holiday === 'string' ? holiday : holiday.date))
-      .filter((date): date is string => Boolean(date)),
-  );
+  return new Set(holidays.map((holiday) => (typeof holiday === 'string' ? holiday : holiday.date)).filter((date): date is string => Boolean(date)));
 }
 
 function addCurrencyValue(totals: CurrencyTotals, currency: CurrencyCode, amount: number) {
@@ -109,12 +105,7 @@ function createProjectionLayerTotals(): ProjectionLayerTotals {
   };
 }
 
-function addToProjectionLayer(
-  layer: ProjectionLayerTotals,
-  currency: CurrencyCode,
-  hours: number,
-  hourlyRate: number,
-) {
+function addToProjectionLayer(layer: ProjectionLayerTotals, currency: CurrencyCode, hours: number, hourlyRate: number) {
   if (hours === 0) {
     return;
   }
@@ -123,11 +114,7 @@ function addToProjectionLayer(
   addCurrencyValue(layer.earningsByCurrency, currency, hours * hourlyRate);
 }
 
-function buildLoggedHoursByProjectDate(
-  workLogs: WorkLog[],
-  monthStartKey: string,
-  monthEndKey: string,
-) {
+function buildLoggedHoursByProjectDate(workLogs: WorkLog[], monthStartKey: string, monthEndKey: string) {
   return workLogs.reduce<Map<string, Map<string, number>>>((totals, log) => {
     if (log.date < monthStartKey || log.date > monthEndKey) {
       return totals;
@@ -193,21 +180,15 @@ function toMonthlyProjection(
     holidayExtraEarningsByCurrency: roundedHolidayExtraLayer.earningsByCurrency,
     loggedDayAdjustmentHours: roundedLoggedAdjustmentLayer.hours,
     loggedDayAdjustmentEarningsByCurrency: roundedLoggedAdjustmentLayer.earningsByCurrency,
-    totalProjectedHours: Number(
-      (roundedBaseLayer.hours + roundedHolidayExtraLayer.hours + roundedLoggedAdjustmentLayer.hours).toFixed(2),
-    ),
+    totalProjectedHours: Number((roundedBaseLayer.hours + roundedHolidayExtraLayer.hours + roundedLoggedAdjustmentLayer.hours).toFixed(2)),
     totalProjectedEarningsByCurrency: roundCurrencyTotals(
-      mergeCurrencyTotals(
-        roundedBaseLayer.earningsByCurrency,
-        roundedHolidayExtraLayer.earningsByCurrency,
-        roundedLoggedAdjustmentLayer.earningsByCurrency,
-      ),
+      mergeCurrencyTotals(roundedBaseLayer.earningsByCurrency, roundedHolidayExtraLayer.earningsByCurrency, roundedLoggedAdjustmentLayer.earningsByCurrency),
     ),
   };
 }
 
 export function calculateMonthlyProjection(
-  projects: Project[],
+  projects: IncomeProject[],
   workLogs: WorkLog[],
   holidays: HolidayLike[],
   selectedMonth = new Date(),

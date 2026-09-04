@@ -4,14 +4,14 @@ import { useProjects } from '@/hooks';
 
 export function ProjectsScreen() {
   const { t } = useAppContext();
-  const { projects, createProject, updateProject, deleteProject } = useProjects();
+  const { managedProjects, createProject, updateProject, deleteProject } = useProjects();
 
   return (
     <MainLayout showHeader={false} title={t('sidebar.projects')}>
       <ProjectsManager
         defaultOpen
         showToggle={false}
-        projects={projects}
+        projects={managedProjects}
         onCreateProject={createProject}
         onUpdateProject={updateProject}
         onDeleteProject={deleteProject}

@@ -1,24 +1,30 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Image, Linking, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { Image, Linking, Modal, Pressable, StyleSheet, Switch, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 
 import { useAppContext } from '@/context';
 import type {
+  CreditorType,
   ContractFile,
   ContractType,
+  CreateDebtProjectInput,
   CreateProjectInput,
   CurrencyCode,
+  DebtStatus,
+  DebtType,
+  PaymentFrequency,
   PaymentRule,
   PaymentType,
   PaymentWeekday,
   Project,
   ProjectColor,
+  ProjectKind,
   UpdateProjectInput,
   WeekdayEstimationKey,
   WeeklyEstimation,
 } from '@/types';
 import { useAppTheme } from '@/theme';
-import { formatCurrency, formatDate, fromDateKey, hasWeeklyEstimation, parseDecimalInput, toDateKey } from '@/utils';
+import { formatCurrency, formatDate, fromDateKey, hasWeeklyEstimation, parseDecimalInput, toDateKey, validateDebtProject } from '@/utils';
 
 import { AppButton } from '../atoms/AppButton';
 import { AppInput } from '../atoms/AppInput';
@@ -28,6 +34,11 @@ import { DateField } from '../molecules/DateField';
 const CONTRACT_TYPES: ContractType[] = ['hourly', 'temporary', 'part-time', 'full-time', 'freelance'];
 const CURRENCIES: CurrencyCode[] = ['EUR', 'USD'];
 const PAYMENT_TYPES: PaymentType[] = ['one_time', 'monthly_fixed_day', 'weekly', 'biweekly'];
+const PROJECT_KINDS: ProjectKind[] = ['income', 'debt'];
+const DEBT_TYPES: DebtType[] = ['financing', 'personal_loan', 'bank_loan', 'credit', 'mortgage', 'installment_purchase', 'other'];
+const CREDITOR_TYPES: CreditorType[] = ['company', 'person'];
+const PAYMENT_FREQUENCIES: PaymentFrequency[] = ['weekly', 'biweekly', 'monthly', 'custom'];
+const DEBT_STATUSES: DebtStatus[] = ['active', 'completed', 'paused'];
 const PROJECT_COLOR_PRESETS: { value: ProjectColor; labelKey: string }[] = [
   { value: '#EF4444', labelKey: 'projects.red' },
   { value: '#F97316', labelKey: 'projects.orange' },
@@ -172,8 +183,69 @@ function buildPaymentRule(values: PaymentRuleFormValues): PaymentRule | undefine
   }
 }
 
+type DebtFormValues = {
+  debtType: DebtType;
+  creditorType: CreditorType;
+  creditorName: string;
+  principalAmount: string;
+  finalAmount: string;
+  interestRate: string;
+  paymentFrequency: PaymentFrequency;
+  manualPayment: boolean;
+  installmentCount: string;
+  installmentAmount: string;
+  endDate: string;
+  notes: string;
+  status: DebtStatus;
+};
+
+function createEmptyDebtValues(date: string): DebtFormValues {
+  return {
+    debtType: 'financing',
+    creditorType: 'company',
+    creditorName: '',
+    principalAmount: '',
+    finalAmount: '',
+    interestRate: '',
+    paymentFrequency: 'monthly',
+    manualPayment: false,
+    installmentCount: '',
+    installmentAmount: '',
+    endDate: date,
+    notes: '',
+    status: 'active',
+  };
+}
+
+function parseOptionalDecimal(value: string) {
+  return value.trim() ? (parseDecimalInput(value) ?? Number.NaN) : undefined;
+}
+
+function buildDebtInput(name: string, currency: CurrencyCode, startDate: string, values: DebtFormValues): CreateDebtProjectInput {
+  return {
+    projectKind: 'debt',
+    name,
+    currency,
+    startDate,
+    debtType: values.debtType,
+    creditorType: values.creditorType,
+    creditorName: values.creditorName,
+    principalAmount: parseDecimalInput(values.principalAmount) ?? Number.NaN,
+    finalAmount: parseDecimalInput(values.finalAmount) ?? Number.NaN,
+    interestRate: parseOptionalDecimal(values.interestRate),
+    paymentFrequency: values.paymentFrequency,
+    manualPayment: values.manualPayment,
+    installmentCount: values.installmentCount.trim() ? Number(values.installmentCount) : undefined,
+    installmentAmount: parseOptionalDecimal(values.installmentAmount),
+    endDate: values.endDate,
+    notes: values.notes.trim() || undefined,
+    status: values.status,
+  };
+}
+
 function getProjectFormDraft(values: ProjectFormValues) {
   return {
+    projectKind: values.projectKind,
     name: values.name,
     hourlyRate: values.hourlyRate,
     currency: values.currency,
@@ -184,6 +256,7 @@ function getProjectFormDraft(values: ProjectFormValues) {
     isEstimationOpen: Boolean(values.weeklyEstimation),
     weeklyEstimation: toWeeklyEstimationState(values.weeklyEstimation),
     contractFile: values.contractFile ?? null,
+    debt: values.debt,
   };
 }
 
@@ -192,7 +265,15 @@ type ContractTypeSelectorProps = {
   onChange: (value: ContractType) => void;
 };
 
+type ChoiceSelectorProps<T extends string> = {
+  label: string;
+  value: T;
+  options: readonly T[];
+  onChange: (value: T) => void;
+};
+
 type ProjectFormValues = {
+  projectKind: ProjectKind;
   name: string;
   hourlyRate: string;
   currency: CurrencyCode;
@@ -202,6 +283,7 @@ type ProjectFormValues = {
   paymentRule?: PaymentRule;
   weeklyEstimation?: WeeklyEstimation;
   contractFile?: ContractFile;
+  debt: DebtFormValues;
 };
 
 type ProjectFormProps = {
@@ -259,6 +341,42 @@ function ContractTypeSelector({ value, onChange }: ContractTypeSelectorProps) {
   );
 }
 
+function ChoiceSelector<T extends string>({ label, value, options, onChange }: ChoiceSelectorProps<T>) {
+  const { t } = useAppContext();
+  const theme = useAppTheme();
+
+  return (
+    <View style={styles.fieldBlock}>
+      <AppText variant="bodySmall" color="muted">
+        {label}
+      </AppText>
+      <View style={styles.typeList}>
+        {options.map((option) => {
+          const isSelected = option === value;
+
+          return (
+            <Pressable
+              key={option}
+              onPress={() => onChange(option)}
+              style={[
+                styles.typeChip,
+                {
+                  backgroundColor: isSelected ? theme.colors.primary : theme.colors.surfaceMuted,
+                  borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                },
+              ]}
+            >
+              <AppText color={isSelected ? 'inverse' : 'text'} variant="bodySmall" weight="semibold">
+                {t(`projects.${option}`)}
+              </AppText>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 function ContractPreview({ contractFile }: { contractFile?: ContractFile }) {
   const { t } = useAppContext();
   const theme = useAppTheme();
@@ -279,9 +397,7 @@ function ContractPreview({ contractFile }: { contractFile?: ContractFile }) {
       <AppText variant="bodySmall" weight="semibold">
         {contractFile.name}
       </AppText>
-      {isImage ? (
-        <Image source={{ uri: contractFile.uri }} style={styles.previewImage} resizeMode="cover" />
-      ) : null}
+      {isImage ? <Image source={{ uri: contractFile.uri }} style={styles.previewImage} resizeMode="cover" /> : null}
       {isPdf ? (
         <View
           style={[
@@ -333,6 +449,7 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
 ) {
   const { locale, t } = useAppContext();
   const theme = useAppTheme();
+  const [projectKind, setProjectKind] = useState(initialValues.projectKind);
   const [name, setName] = useState(initialValues.name);
   const [hourlyRate, setHourlyRate] = useState(initialValues.hourlyRate);
   const [currency, setCurrency] = useState<CurrencyCode>(initialValues.currency);
@@ -344,13 +461,13 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
     toPaymentRuleFormValues(initialValues.paymentRule, initialValues.startDate),
   );
   const [isEstimationOpen, setIsEstimationOpen] = useState(Boolean(initialValues.weeklyEstimation));
-  const [weeklyEstimation, setWeeklyEstimation] = useState<Record<WeekdayEstimationKey, string>>(
-    toWeeklyEstimationState(initialValues.weeklyEstimation),
-  );
+  const [weeklyEstimation, setWeeklyEstimation] = useState<Record<WeekdayEstimationKey, string>>(toWeeklyEstimationState(initialValues.weeklyEstimation));
   const [contractFile, setContractFile] = useState<ContractFile | undefined>(initialValues.contractFile);
+  const [debtValues, setDebtValues] = useState(initialValues.debt);
   const initialDraft = getProjectFormDraft(initialValues);
 
   useEffect(() => {
+    setProjectKind(initialValues.projectKind);
     setName(initialValues.name);
     setHourlyRate(initialValues.hourlyRate);
     setCurrency(initialValues.currency);
@@ -362,6 +479,7 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
     setIsEstimationOpen(Boolean(initialValues.weeklyEstimation));
     setWeeklyEstimation(toWeeklyEstimationState(initialValues.weeklyEstimation));
     setContractFile(initialValues.contractFile);
+    setDebtValues(initialValues.debt);
   }, [
     initialValues.color,
     initialValues.contractFile,
@@ -370,8 +488,10 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
     initialValues.hourlyRate,
     initialValues.name,
     initialValues.paymentRule,
+    initialValues.projectKind,
     initialValues.startDate,
     initialValues.weeklyEstimation,
+    initialValues.debt,
   ]);
 
   const parsedRate = parseDecimalInput(hourlyRate);
@@ -385,10 +505,16 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
   }, EMPTY_WEEKLY_ESTIMATION);
   const hasConfiguredEstimation = Object.values(parsedWeeklyEstimation).some((value) => value > 0);
   const paymentRule = buildPaymentRule(paymentRuleValues);
-  const canSubmit = Boolean(name.trim()) && parsedRate !== null && parsedRate > 0 && Boolean(startDate) && Boolean(paymentRule);
+  const debtInput = useMemo(() => buildDebtInput(name, currency, startDate, debtValues), [currency, debtValues, name, startDate]);
+  const debtValidationError = validateDebtProject(debtInput);
+  const canSubmit =
+    projectKind === 'income'
+      ? Boolean(name.trim()) && parsedRate !== null && parsedRate > 0 && Boolean(startDate) && Boolean(paymentRule)
+      : debtValidationError === null;
   const selectedColorOption = PROJECT_COLOR_PRESETS.find((option) => option.value === selectedColor);
   const currentDraft = useMemo(
     () => ({
+      projectKind,
       name,
       hourlyRate,
       currency,
@@ -399,24 +525,45 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
       isEstimationOpen,
       weeklyEstimation,
       contractFile: contractFile ?? null,
+      debt: debtValues,
     }),
-    [contractFile, contractType, currency, hourlyRate, isEstimationOpen, name, paymentRuleValues, selectedColor, startDate, weeklyEstimation],
+    [
+      contractFile,
+      contractType,
+      currency,
+      debtValues,
+      hourlyRate,
+      isEstimationOpen,
+      name,
+      paymentRuleValues,
+      projectKind,
+      selectedColor,
+      startDate,
+      weeklyEstimation,
+    ],
   );
-  const isDirty = useMemo(
-    () => JSON.stringify(initialDraft) !== JSON.stringify(currentDraft),
-    [currentDraft, initialDraft],
-  );
+  const isDirty = useMemo(() => JSON.stringify(initialDraft) !== JSON.stringify(currentDraft), [currentDraft, initialDraft]);
 
   useEffect(() => {
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
   const submitForm = useCallback(() => {
-    if (!canSubmit || parsedRate === null) {
+    if (!canSubmit) {
+      return false;
+    }
+
+    if (projectKind === 'debt') {
+      onSubmit(debtInput);
+      return true;
+    }
+
+    if (parsedRate === null) {
       return false;
     }
 
     const payload = {
+      projectKind: 'income' as const,
       name,
       hourlyRate: parsedRate,
       currency,
@@ -435,12 +582,14 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
     contractFile,
     contractType,
     currency,
+    debtInput,
     hasConfiguredEstimation,
     name,
     onSubmit,
     parsedRate,
     parsedWeeklyEstimation,
     paymentRule,
+    projectKind,
     selectedColor,
     startDate,
   ]);
@@ -473,315 +622,467 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
           </AppText>
         ) : null}
 
+        <ChoiceSelector label={t('projects.projectType')} value={projectKind} options={PROJECT_KINDS} onChange={setProjectKind} />
         <AppInput onChangeText={setName} placeholder={t('projects.projectName')} value={name} />
-        <AppInput
-          keyboardType="decimal-pad"
-          onChangeText={setHourlyRate}
-          placeholder={t('projects.hourlyRatePlaceholder', { currency })}
-          value={hourlyRate}
-        />
-        {parsedRate ? (
-          <AppText color="muted" variant="bodySmall">
-            {t('projects.ratePreview', { value: formatCurrency(parsedRate, locale, currency) })}
-          </AppText>
-        ) : null}
-        <View style={styles.fieldBlock}>
-          <AppText variant="bodySmall" color="muted">
-            {t('projects.currency')}
-          </AppText>
-          <View style={styles.typeList}>
-            {CURRENCIES.map((option) => {
-              const isSelected = option === currency;
+        {projectKind === 'income' ? (
+          <>
+            <AppInput
+              keyboardType="decimal-pad"
+              onChangeText={setHourlyRate}
+              placeholder={t('projects.hourlyRatePlaceholder', { currency })}
+              value={hourlyRate}
+            />
+            {parsedRate ? (
+              <AppText color="muted" variant="bodySmall">
+                {t('projects.ratePreview', { value: formatCurrency(parsedRate, locale, currency) })}
+              </AppText>
+            ) : null}
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.currency')}
+              </AppText>
+              <View style={styles.typeList}>
+                {CURRENCIES.map((option) => {
+                  const isSelected = option === currency;
 
-              return (
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => setCurrency(option)}
+                      style={[
+                        styles.typeChip,
+                        {
+                          backgroundColor: isSelected ? theme.colors.primary : theme.colors.surfaceMuted,
+                          borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                        },
+                      ]}
+                    >
+                      <AppText color={isSelected ? 'inverse' : 'text'} variant="bodySmall" weight="semibold">
+                        {option}
+                      </AppText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+            <DateField label={t('projects.startDate')} onChange={setStartDate} value={startDate} />
+
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.color')}
+              </AppText>
+              <View style={styles.colorActions}>
                 <Pressable
-                  key={option}
-                  onPress={() => setCurrency(option)}
+                  onPress={() => setSelectedColor(null)}
                   style={[
-                    styles.typeChip,
+                    styles.colorActionButton,
                     {
-                      backgroundColor: isSelected ? theme.colors.primary : theme.colors.surfaceMuted,
-                      borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                      backgroundColor: theme.colors.surface,
+                      borderColor: selectedColor === null ? theme.colors.primary : theme.colors.border,
                     },
                   ]}
                 >
-                  <AppText color={isSelected ? 'inverse' : 'text'} variant="bodySmall" weight="semibold">
-                    {option}
+                  <AppText color={selectedColor === null ? 'primary' : 'text'} variant="bodySmall" weight="semibold">
+                    {t('projects.noColor')}
                   </AppText>
                 </Pressable>
-              );
-            })}
-          </View>
-        </View>
-        <DateField label={t('projects.startDate')} onChange={setStartDate} value={startDate} />
+                <Pressable
+                  onPress={() => setColorSheetOpen(true)}
+                  style={[
+                    styles.colorActionButton,
+                    styles.chooseColorButton,
+                    {
+                      backgroundColor: theme.colors.surface,
+                      borderColor: selectedColor ? theme.colors.primary : theme.colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.chooseColorContent}>
+                    {selectedColor ? (
+                      <View
+                        style={[
+                          styles.selectedColorSwatch,
+                          {
+                            backgroundColor: selectedColor,
+                          },
+                        ]}
+                      />
+                    ) : null}
+                    <View style={styles.chooseColorText}>
+                      <AppText color={selectedColor ? 'primary' : 'text'} variant="bodySmall" weight="semibold">
+                        {selectedColor ? t('projects.chosenColor') : t('projects.chooseColor')}
+                      </AppText>
+                      {selectedColorOption ? (
+                        <AppText color="muted" variant="bodySmall">
+                          {t(selectedColorOption.labelKey)}
+                        </AppText>
+                      ) : null}
+                    </View>
+                  </View>
+                </Pressable>
+              </View>
+            </View>
 
-        <View style={styles.fieldBlock}>
-          <AppText variant="bodySmall" color="muted">
-            {t('projects.color')}
-          </AppText>
-          <View style={styles.colorActions}>
-            <Pressable
-              onPress={() => setSelectedColor(null)}
+            <View
               style={[
-                styles.colorActionButton,
+                styles.accordionCard,
                 {
                   backgroundColor: theme.colors.surface,
-                  borderColor: selectedColor === null ? theme.colors.primary : theme.colors.border,
+                  borderColor: theme.colors.border,
                 },
               ]}
             >
-              <AppText color={selectedColor === null ? 'primary' : 'text'} variant="bodySmall" weight="semibold">
-                {t('projects.noColor')}
-              </AppText>
-            </Pressable>
-            <Pressable
-              onPress={() => setColorSheetOpen(true)}
-              style={[
-                styles.colorActionButton,
-                styles.chooseColorButton,
-                {
-                  backgroundColor: theme.colors.surface,
-                  borderColor: selectedColor ? theme.colors.primary : theme.colors.border,
-                },
-              ]}
-            >
-              <View style={styles.chooseColorContent}>
-                {selectedColor ? (
-                  <View
-                    style={[
-                      styles.selectedColorSwatch,
-                      {
-                        backgroundColor: selectedColor,
-                      },
-                    ]}
-                  />
-                ) : null}
-                <View style={styles.chooseColorText}>
-                  <AppText color={selectedColor ? 'primary' : 'text'} variant="bodySmall" weight="semibold">
-                    {selectedColor ? t('projects.chosenColor') : t('projects.chooseColor')}
-                  </AppText>
-                  {selectedColorOption ? (
-                    <AppText color="muted" variant="bodySmall">
-                      {t(selectedColorOption.labelKey)}
-                    </AppText>
-                  ) : null}
+              <View style={styles.fieldBlock}>
+                <AppText weight="semibold">{t('projects.paymentRuleTitle')}</AppText>
+                <AppText color="muted" variant="bodySmall">
+                  {t('projects.paymentRuleDescription')}
+                </AppText>
+              </View>
+
+              <View style={styles.fieldBlock}>
+                <AppText variant="bodySmall" color="muted">
+                  {t('projects.paymentType')}
+                </AppText>
+                <View style={styles.typeList}>
+                  {PAYMENT_TYPES.map((option) => {
+                    const isSelected = option === paymentRuleValues.paymentType;
+
+                    return (
+                      <Pressable
+                        key={option}
+                        onPress={() => {
+                          setPaymentRuleValues((currentValue) => ({
+                            ...currentValue,
+                            paymentType: option,
+                          }));
+                        }}
+                        style={[
+                          styles.typeChip,
+                          {
+                            backgroundColor: isSelected ? theme.colors.primary : theme.colors.surfaceMuted,
+                            borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                          },
+                        ]}
+                      >
+                        <AppText color={isSelected ? 'inverse' : 'text'} variant="bodySmall" weight="semibold">
+                          {t(`projects.${option}`)}
+                        </AppText>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               </View>
-            </Pressable>
-          </View>
-        </View>
 
-        <View
-          style={[
-            styles.accordionCard,
-            {
-              backgroundColor: theme.colors.surface,
-              borderColor: theme.colors.border,
-            },
-          ]}
-        >
-        <View style={styles.fieldBlock}>
-          <AppText weight="semibold">{t('projects.paymentRuleTitle')}</AppText>
-          <AppText color="muted" variant="bodySmall">
-            {t('projects.paymentRuleDescription')}
-          </AppText>
-        </View>
-
-        <View style={styles.fieldBlock}>
-          <AppText variant="bodySmall" color="muted">
-            {t('projects.paymentType')}
-          </AppText>
-          <View style={styles.typeList}>
-            {PAYMENT_TYPES.map((option) => {
-              const isSelected = option === paymentRuleValues.paymentType;
-
-              return (
-                <Pressable
-                  key={option}
-                  onPress={() => {
+              {paymentRuleValues.paymentType === 'one_time' ? (
+                <DateField
+                  label={t('projects.paymentDate')}
+                  onChange={(value) => {
                     setPaymentRuleValues((currentValue) => ({
                       ...currentValue,
-                      paymentType: option,
+                      paymentDate: value,
                     }));
                   }}
-                  style={[
-                    styles.typeChip,
-                    {
-                      backgroundColor: isSelected ? theme.colors.primary : theme.colors.surfaceMuted,
-                      borderColor: isSelected ? theme.colors.primary : theme.colors.border,
-                    },
-                  ]}
-                >
-                  <AppText color={isSelected ? 'inverse' : 'text'} variant="bodySmall" weight="semibold">
-                    {t(`projects.${option}`)}
+                  value={paymentRuleValues.paymentDate}
+                />
+              ) : null}
+
+              {paymentRuleValues.paymentType === 'monthly_fixed_day' ? (
+                <View style={styles.fieldBlock}>
+                  <AppText variant="bodySmall" color="muted">
+                    {t('projects.paymentDayOfMonth')}
                   </AppText>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {paymentRuleValues.paymentType === 'one_time' ? (
-          <DateField
-            label={t('projects.paymentDate')}
-            onChange={(value) => {
-              setPaymentRuleValues((currentValue) => ({
-                ...currentValue,
-                paymentDate: value,
-              }));
-            }}
-            value={paymentRuleValues.paymentDate}
-          />
-        ) : null}
-
-        {paymentRuleValues.paymentType === 'monthly_fixed_day' ? (
-          <View style={styles.fieldBlock}>
-            <AppText variant="bodySmall" color="muted">
-              {t('projects.paymentDayOfMonth')}
-            </AppText>
-            <AppInput
-              keyboardType="number-pad"
-              onChangeText={(value) => {
-                setPaymentRuleValues((currentValue) => ({
-                  ...currentValue,
-                  paymentDayOfMonth: value,
-                }));
-              }}
-              placeholder="30"
-              value={paymentRuleValues.paymentDayOfMonth}
-            />
-          </View>
-        ) : null}
-
-        {paymentRuleValues.paymentType === 'weekly' ? (
-          <View style={styles.fieldBlock}>
-            <AppText variant="bodySmall" color="muted">
-              {t('projects.paymentWeekday')}
-            </AppText>
-            <View style={styles.typeList}>
-              {PAYMENT_WEEKDAY_OPTIONS.map((option) => {
-                const isSelected = option.value === paymentRuleValues.paymentWeekday;
-
-                return (
-                  <Pressable
-                    key={option.value}
-                    onPress={() => {
+                  <AppInput
+                    keyboardType="number-pad"
+                    onChangeText={(value) => {
                       setPaymentRuleValues((currentValue) => ({
                         ...currentValue,
-                        paymentWeekday: option.value,
+                        paymentDayOfMonth: value,
                       }));
                     }}
-                    style={[
-                      styles.typeChip,
-                      {
-                        backgroundColor: isSelected ? theme.colors.primary : theme.colors.surfaceMuted,
-                        borderColor: isSelected ? theme.colors.primary : theme.colors.border,
-                      },
-                    ]}
-                  >
-                    <AppText color={isSelected ? 'inverse' : 'text'} variant="bodySmall" weight="semibold">
-                      {t(option.labelKey)}
-                    </AppText>
-                  </Pressable>
-                );
-              })}
+                    placeholder="30"
+                    value={paymentRuleValues.paymentDayOfMonth}
+                  />
+                </View>
+              ) : null}
+
+              {paymentRuleValues.paymentType === 'weekly' ? (
+                <View style={styles.fieldBlock}>
+                  <AppText variant="bodySmall" color="muted">
+                    {t('projects.paymentWeekday')}
+                  </AppText>
+                  <View style={styles.typeList}>
+                    {PAYMENT_WEEKDAY_OPTIONS.map((option) => {
+                      const isSelected = option.value === paymentRuleValues.paymentWeekday;
+
+                      return (
+                        <Pressable
+                          key={option.value}
+                          onPress={() => {
+                            setPaymentRuleValues((currentValue) => ({
+                              ...currentValue,
+                              paymentWeekday: option.value,
+                            }));
+                          }}
+                          style={[
+                            styles.typeChip,
+                            {
+                              backgroundColor: isSelected ? theme.colors.primary : theme.colors.surfaceMuted,
+                              borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                            },
+                          ]}
+                        >
+                          <AppText color={isSelected ? 'inverse' : 'text'} variant="bodySmall" weight="semibold">
+                            {t(option.labelKey)}
+                          </AppText>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ) : null}
+
+              {paymentRuleValues.paymentType === 'biweekly' ? (
+                <DateField
+                  label={t('projects.paymentStartDate')}
+                  onChange={(value) => {
+                    setPaymentRuleValues((currentValue) => ({
+                      ...currentValue,
+                      paymentStartDate: value,
+                    }));
+                  }}
+                  value={paymentRuleValues.paymentStartDate}
+                />
+              ) : null}
             </View>
-          </View>
-        ) : null}
 
-        {paymentRuleValues.paymentType === 'biweekly' ? (
-          <DateField
-            label={t('projects.paymentStartDate')}
-            onChange={(value) => {
-              setPaymentRuleValues((currentValue) => ({
-                ...currentValue,
-                paymentStartDate: value,
-              }));
-            }}
-            value={paymentRuleValues.paymentStartDate}
-          />
-        ) : null}
-        </View>
+            <View
+              style={[
+                styles.accordionCard,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                },
+              ]}
+            >
+              <Pressable onPress={() => setIsEstimationOpen((currentValue) => !currentValue)} style={styles.accordionToggle}>
+                <View style={styles.accordionText}>
+                  <AppText weight="semibold">{t('projects.weeklyEstimationTitle')}</AppText>
+                  <AppText color="muted" variant="bodySmall">
+                    {t('projects.weeklyEstimationDescription')}
+                  </AppText>
+                </View>
+                <AppText color="primary" weight="semibold">
+                  {isEstimationOpen ? t('common.close') : t('common.edit')}
+                </AppText>
+              </Pressable>
 
-        <View
-          style={[
-            styles.accordionCard,
-            {
-              backgroundColor: theme.colors.surface,
-              borderColor: theme.colors.border,
-            },
-          ]}
-        >
-        <Pressable onPress={() => setIsEstimationOpen((currentValue) => !currentValue)} style={styles.accordionToggle}>
-          <View style={styles.accordionText}>
-            <AppText weight="semibold">{t('projects.weeklyEstimationTitle')}</AppText>
-            <AppText color="muted" variant="bodySmall">
-              {t('projects.weeklyEstimationDescription')}
-            </AppText>
-          </View>
-          <AppText color="primary" weight="semibold">
-            {isEstimationOpen ? t('common.close') : t('common.edit')}
-          </AppText>
-        </Pressable>
+              {isEstimationOpen ? (
+                <View style={styles.estimationGrid}>
+                  {WEEKDAY_FIELDS.map((field) => (
+                    <View key={field.key} style={styles.estimationField}>
+                      <AppText variant="bodySmall" color="muted">
+                        {t(field.labelKey)}
+                      </AppText>
+                      <AppInput
+                        keyboardType="decimal-pad"
+                        onChangeText={(value) => {
+                          setWeeklyEstimation((currentValue) => ({
+                            ...currentValue,
+                            [field.key]: value,
+                          }));
+                        }}
+                        placeholder="0"
+                        value={weeklyEstimation[field.key]}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
 
-        {isEstimationOpen ? (
-          <View style={styles.estimationGrid}>
-            {WEEKDAY_FIELDS.map((field) => (
-              <View key={field.key} style={styles.estimationField}>
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.contractType')}
+              </AppText>
+              <ContractTypeSelector value={contractType} onChange={setContractType} />
+            </View>
+
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.contractFile')}
+              </AppText>
+              <AppButton
+                title={contractFile ? t('projects.replaceFile') : t('projects.uploadContract')}
+                onPress={async () => {
+                  const file = await pickContractFile();
+
+                  if (file) {
+                    setContractFile(file);
+                  }
+                }}
+                variant="secondary"
+                fullWidth={false}
+              />
+              <ContractPreview contractFile={contractFile} />
+            </View>
+          </>
+        ) : (
+          <>
+            <AppText weight="semibold">{t('projects.debtGeneral')}</AppText>
+            <ChoiceSelector
+              label={t('projects.debtType')}
+              value={debtValues.debtType}
+              options={DEBT_TYPES}
+              onChange={(debtType) => setDebtValues((current) => ({ ...current, debtType }))}
+            />
+            <ChoiceSelector
+              label={t('projects.creditorType')}
+              value={debtValues.creditorType}
+              options={CREDITOR_TYPES}
+              onChange={(creditorType) => setDebtValues((current) => ({ ...current, creditorType }))}
+            />
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.creditorName')}
+              </AppText>
+              <AppInput value={debtValues.creditorName} onChangeText={(creditorName) => setDebtValues((current) => ({ ...current, creditorName }))} />
+            </View>
+
+            <AppText weight="semibold">{t('projects.debtAmount')}</AppText>
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.currency')}
+              </AppText>
+              <View style={styles.typeList}>
+                {CURRENCIES.map((option) => {
+                  const isSelected = option === currency;
+
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => setCurrency(option)}
+                      style={[
+                        styles.typeChip,
+                        {
+                          backgroundColor: isSelected ? theme.colors.primary : theme.colors.surfaceMuted,
+                          borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                        },
+                      ]}
+                    >
+                      <AppText color={isSelected ? 'inverse' : 'text'} variant="bodySmall" weight="semibold">
+                        {option}
+                      </AppText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+            <View style={styles.estimationGrid}>
+              <View style={styles.estimationField}>
                 <AppText variant="bodySmall" color="muted">
-                  {t(field.labelKey)}
+                  {t('projects.principalAmount')}
                 </AppText>
                 <AppInput
                   keyboardType="decimal-pad"
-                  onChangeText={(value) => {
-                    setWeeklyEstimation((currentValue) => ({
-                      ...currentValue,
-                      [field.key]: value,
-                    }));
-                  }}
-                  placeholder="0"
-                  value={weeklyEstimation[field.key]}
+                  value={debtValues.principalAmount}
+                  onChangeText={(principalAmount) => setDebtValues((current) => ({ ...current, principalAmount }))}
                 />
               </View>
-            ))}
-          </View>
-        ) : null}
-        </View>
+              <View style={styles.estimationField}>
+                <AppText variant="bodySmall" color="muted">
+                  {t('projects.finalAmount')}
+                </AppText>
+                <AppInput
+                  keyboardType="decimal-pad"
+                  value={debtValues.finalAmount}
+                  onChangeText={(finalAmount) => setDebtValues((current) => ({ ...current, finalAmount }))}
+                />
+              </View>
+            </View>
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.interestRate')}
+              </AppText>
+              <AppInput
+                keyboardType="decimal-pad"
+                placeholder={t('projects.optional')}
+                value={debtValues.interestRate}
+                onChangeText={(interestRate) => setDebtValues((current) => ({ ...current, interestRate }))}
+              />
+            </View>
 
-        <View style={styles.fieldBlock}>
-          <AppText variant="bodySmall" color="muted">
-            {t('projects.contractType')}
-          </AppText>
-          <ContractTypeSelector value={contractType} onChange={setContractType} />
-        </View>
+            <AppText weight="semibold">{t('projects.paymentPlan')}</AppText>
+            <ChoiceSelector
+              label={t('projects.paymentFrequency')}
+              value={debtValues.paymentFrequency}
+              options={PAYMENT_FREQUENCIES}
+              onChange={(paymentFrequency) => setDebtValues((current) => ({ ...current, paymentFrequency }))}
+            />
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.manualPayment')}
+              </AppText>
+              <Switch value={debtValues.manualPayment} onValueChange={(manualPayment) => setDebtValues((current) => ({ ...current, manualPayment }))} />
+            </View>
+            <View style={styles.estimationGrid}>
+              <View style={styles.estimationField}>
+                <AppText variant="bodySmall" color="muted">
+                  {t('projects.installmentCount')}
+                </AppText>
+                <AppInput
+                  keyboardType="number-pad"
+                  placeholder={t('projects.optional')}
+                  value={debtValues.installmentCount}
+                  onChangeText={(installmentCount) => setDebtValues((current) => ({ ...current, installmentCount }))}
+                />
+              </View>
+              <View style={styles.estimationField}>
+                <AppText variant="bodySmall" color="muted">
+                  {t('projects.installmentAmount')}
+                </AppText>
+                <AppInput
+                  keyboardType="decimal-pad"
+                  placeholder={t('projects.optional')}
+                  value={debtValues.installmentAmount}
+                  onChangeText={(installmentAmount) => setDebtValues((current) => ({ ...current, installmentAmount }))}
+                />
+              </View>
+            </View>
+            <DateField label={t('projects.startDate')} onChange={setStartDate} value={startDate} />
+            <DateField label={t('projects.dueDate')} value={debtValues.endDate} onChange={(endDate) => setDebtValues((current) => ({ ...current, endDate }))} />
 
-        <View style={styles.fieldBlock}>
-          <AppText variant="bodySmall" color="muted">
-            {t('projects.contractFile')}
-          </AppText>
-          <AppButton
-            title={contractFile ? t('projects.replaceFile') : t('projects.uploadContract')}
-            onPress={async () => {
-              const file = await pickContractFile();
-
-              if (file) {
-                setContractFile(file);
-              }
-            }}
-            variant="secondary"
-            fullWidth={false}
-          />
-          <ContractPreview contractFile={contractFile} />
-        </View>
+            <AppText weight="semibold">{t('projects.additional')}</AppText>
+            <ChoiceSelector
+              label={t('projects.status')}
+              value={debtValues.status}
+              options={DEBT_STATUSES}
+              onChange={(status) => setDebtValues((current) => ({ ...current, status }))}
+            />
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.notes')}
+              </AppText>
+              <AppInput
+                multiline
+                numberOfLines={4}
+                placeholder={t('projects.optional')}
+                style={styles.notesInput}
+                textAlignVertical="top"
+                value={debtValues.notes}
+                onChangeText={(notes) => setDebtValues((current) => ({ ...current, notes }))}
+              />
+            </View>
+            {debtValidationError ? (
+              <AppText color="danger" variant="bodySmall">
+                {t(`projects.debtValidation.${debtValidationError}`)}
+              </AppText>
+            ) : null}
+          </>
+        )}
 
         <View style={styles.formActions}>
           {onCancel ? <AppButton title={t('common.cancel')} onPress={onCancel} variant="secondary" fullWidth={false} /> : null}
-          <AppButton
-            title={submitLabel}
-            onPress={submitForm}
-            disabled={!canSubmit}
-            fullWidth={false}
-          />
+          <AppButton title={submitLabel} onPress={submitForm} disabled={!canSubmit} fullWidth={false} />
         </View>
       </View>
 
@@ -855,14 +1156,7 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
   );
 });
 
-export function ProjectsManager({
-  projects,
-  onCreateProject,
-  onUpdateProject,
-  onDeleteProject,
-  defaultOpen = false,
-  showToggle = true,
-}: ProjectsManagerProps) {
+export function ProjectsManager({ projects, onCreateProject, onUpdateProject, onDeleteProject, defaultOpen = false, showToggle = true }: ProjectsManagerProps) {
   const { locale, showToast, t } = useAppContext();
   const theme = useAppTheme();
   const isFlatLayout = !showToggle;
@@ -875,30 +1169,31 @@ export function ProjectsManager({
   const editFormRef = useRef<ProjectFormHandle>(null);
   const unsavedSaveActionRef = useRef<(() => boolean) | null>(null);
   const unsavedDiscardActionRef = useRef<(() => void) | null>(null);
-  const editingProject = useMemo(
-    () => projects.find((project) => project.id === editingProjectId),
-    [editingProjectId, projects],
-  );
-  const createProjectInitialValues = useMemo<ProjectFormValues>(
-    () => ({
+  const editingProject = useMemo(() => projects.find((project) => project.id === editingProjectId), [editingProjectId, projects]);
+  const createProjectInitialValues = useMemo<ProjectFormValues>(() => {
+    const today = toDateKey(new Date());
+
+    return {
+      projectKind: 'income',
       name: '',
       hourlyRate: '',
       currency: 'EUR',
       contractType: 'hourly',
-      startDate: toDateKey(new Date()),
+      startDate: today,
       color: null,
       paymentRule: {
         type: 'one_time',
-        paymentDate: toDateKey(new Date()),
+        paymentDate: today,
       },
       weeklyEstimation: undefined,
-    }),
-    [],
-  );
+      debt: createEmptyDebtValues(today),
+    };
+  }, []);
   const editingProjectInitialValues = useMemo<ProjectFormValues | null>(
     () =>
-      editingProject
+      editingProject?.projectKind === 'income'
         ? {
+            projectKind: 'income',
             name: editingProject.name,
             hourlyRate: String(editingProject.hourlyRate),
             currency: editingProject.currency,
@@ -908,8 +1203,37 @@ export function ProjectsManager({
             paymentRule: editingProject.paymentRule,
             weeklyEstimation: editingProject.weeklyEstimation,
             contractFile: editingProject.contractFile,
+            debt: createEmptyDebtValues(editingProject.startDate),
           }
-        : null,
+        : editingProject
+          ? {
+              projectKind: 'debt',
+              name: editingProject.name,
+              hourlyRate: '',
+              currency: editingProject.currency,
+              contractType: 'hourly',
+              startDate: editingProject.startDate,
+              color: null,
+              paymentRule: undefined,
+              weeklyEstimation: undefined,
+              contractFile: undefined,
+              debt: {
+                debtType: editingProject.debtType,
+                creditorType: editingProject.creditorType,
+                creditorName: editingProject.creditorName,
+                principalAmount: String(editingProject.principalAmount),
+                finalAmount: String(editingProject.finalAmount),
+                interestRate: editingProject.interestRate === undefined ? '' : String(editingProject.interestRate),
+                paymentFrequency: editingProject.paymentFrequency,
+                manualPayment: editingProject.manualPayment,
+                installmentCount: editingProject.installmentCount === undefined ? '' : String(editingProject.installmentCount),
+                installmentAmount: editingProject.installmentAmount === undefined ? '' : String(editingProject.installmentAmount),
+                endDate: editingProject.endDate,
+                notes: editingProject.notes ?? '',
+                status: editingProject.status,
+              },
+            }
+          : null,
     [editingProject],
   );
 
@@ -1037,12 +1361,7 @@ export function ProjectsManager({
   return (
     <View style={styles.wrapper}>
       {showToggle ? (
-        <AppButton
-          title={isOpen ? t('projects.hide') : t('projects.manage')}
-          onPress={requestSectionToggle}
-          variant="secondary"
-          fullWidth={false}
-        />
+        <AppButton title={isOpen ? t('projects.hide') : t('projects.manage')} onPress={requestSectionToggle} variant="secondary" fullWidth={false} />
       ) : null}
 
       {isOpen ? (
@@ -1080,13 +1399,38 @@ export function ProjectsManager({
                 >
                   <View style={styles.projectCardHeader}>
                     <View style={styles.projectMeta}>
-                      <AppText weight="bold">{project.name}</AppText>
+                      <View style={styles.projectTitleRow}>
+                        <AppText weight="bold">{project.name}</AppText>
+                        <View
+                          style={[
+                            styles.kindBadge,
+                            {
+                              backgroundColor: project.projectKind === 'debt' ? theme.colors.warningSoft : theme.colors.primarySoft,
+                            },
+                          ]}
+                        >
+                          <AppText
+                            variant="label"
+                            weight="bold"
+                            style={{
+                              color: project.projectKind === 'debt' ? theme.colors.warning : theme.colors.primary,
+                            }}
+                          >
+                            {t(`projects.${project.projectKind}`)}
+                          </AppText>
+                        </View>
+                      </View>
                       <AppText color="muted" variant="bodySmall">
-                        {formatCurrency(project.hourlyRate, locale, project.currency)}/h | {project.currency} | {t(`projects.${project.contractType}`)} | {t('projects.started', {
-                          date: formatDate(fromDateKey(project.startDate), locale),
-                        })}
+                        {project.projectKind === 'income'
+                          ? `${formatCurrency(project.hourlyRate, locale, project.currency)}/h | ${project.currency} | ${t(`projects.${project.contractType}`)} | ${t(
+                              'projects.started',
+                              {
+                                date: formatDate(fromDateKey(project.startDate), locale),
+                              },
+                            )}`
+                          : `${project.creditorName} | ${formatCurrency(project.finalAmount, locale, project.currency)} | ${t(`projects.${project.status}`)}`}
                       </AppText>
-                      {hasWeeklyEstimation(project) ? (
+                      {project.projectKind === 'income' && hasWeeklyEstimation(project) ? (
                         <AppText color="muted" variant="bodySmall">
                           {t('projects.weeklyEstimationConfigured')}
                         </AppText>
@@ -1099,16 +1443,11 @@ export function ProjectsManager({
                         variant="secondary"
                         fullWidth={false}
                       />
-                      <AppButton
-                        title={t('common.delete')}
-                        onPress={() => setProjectPendingDelete(project)}
-                        variant="ghost"
-                        fullWidth={false}
-                      />
+                      <AppButton title={t('common.delete')} onPress={() => setProjectPendingDelete(project)} variant="ghost" fullWidth={false} />
                     </View>
                   </View>
 
-                  <ContractPreview contractFile={project.contractFile} />
+                  {project.projectKind === 'income' ? <ContractPreview contractFile={project.contractFile} /> : null}
 
                   {isEditing && editingProject && editingProjectInitialValues ? (
                     <ProjectForm
@@ -1183,12 +1522,7 @@ export function ProjectsManager({
         </View>
       ) : null}
 
-      <Modal
-        animationType="fade"
-        transparent
-        visible={Boolean(projectPendingDelete)}
-        onRequestClose={() => setProjectPendingDelete(null)}
-      >
+      <Modal animationType="fade" transparent visible={Boolean(projectPendingDelete)} onRequestClose={() => setProjectPendingDelete(null)}>
         <View style={styles.modalOverlay}>
           <View
             style={[
@@ -1204,16 +1538,13 @@ export function ProjectsManager({
             </AppText>
             <AppText color="muted">
               {projectPendingDelete
-                ? t('projects.deleteBody', { name: projectPendingDelete.name })
+                ? t(projectPendingDelete.projectKind === 'debt' ? 'projects.deleteDebtBody' : 'projects.deleteBody', {
+                    name: projectPendingDelete.name,
+                  })
                 : t('projects.deleteFallback')}
             </AppText>
             <View style={styles.modalActions}>
-              <AppButton
-                title={t('common.cancel')}
-                onPress={() => setProjectPendingDelete(null)}
-                variant="secondary"
-                fullWidth={false}
-              />
+              <AppButton title={t('common.cancel')} onPress={() => setProjectPendingDelete(null)} variant="secondary" fullWidth={false} />
               <AppButton
                 title={t('common.delete')}
                 onPress={() => {
@@ -1238,12 +1569,7 @@ export function ProjectsManager({
         </View>
       </Modal>
 
-      <Modal
-        animationType="fade"
-        transparent
-        visible={isUnsavedChangesModalOpen}
-        onRequestClose={closeUnsavedChangesModal}
-      >
+      <Modal animationType="fade" transparent visible={isUnsavedChangesModalOpen} onRequestClose={closeUnsavedChangesModal}>
         <View style={styles.modalOverlay}>
           <View
             style={[
@@ -1259,23 +1585,9 @@ export function ProjectsManager({
             </AppText>
             <AppText color="muted">{t('feedback.unsavedChangesBody')}</AppText>
             <View style={styles.modalActions}>
-              <AppButton
-                title={t('common.cancel')}
-                onPress={closeUnsavedChangesModal}
-                variant="secondary"
-                fullWidth={false}
-              />
-              <AppButton
-                title={t('common.discard')}
-                onPress={confirmDiscardChanges}
-                variant="ghost"
-                fullWidth={false}
-              />
-              <AppButton
-                title={t('common.saveChanges')}
-                onPress={confirmSaveChanges}
-                fullWidth={false}
-              />
+              <AppButton title={t('common.cancel')} onPress={closeUnsavedChangesModal} variant="secondary" fullWidth={false} />
+              <AppButton title={t('common.discard')} onPress={confirmDiscardChanges} variant="ghost" fullWidth={false} />
+              <AppButton title={t('common.saveChanges')} onPress={confirmSaveChanges} fullWidth={false} />
             </View>
           </View>
         </View>
@@ -1415,6 +1727,20 @@ const styles = StyleSheet.create({
   },
   projectMeta: {
     gap: 4,
+  },
+  projectTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  kindBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  notesInput: {
+    minHeight: 96,
   },
   projectButtons: {
     flexDirection: 'row',

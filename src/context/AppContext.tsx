@@ -3,11 +3,13 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 import { translate } from '@/i18n';
 import { STORAGE_KEYS } from '@/constants';
-import { PROJECT_COLOR_OPTIONS } from '@/types';
+import { isIncomeProject, PROJECT_COLOR_OPTIONS } from '@/types';
 import type {
   AppLanguage,
   CreateProjectInput,
   CreateWorkLogInput,
+  DebtProject,
+  IncomeProject,
   PaymentRule,
   PaymentWeekday,
   ProjectColor,
@@ -23,6 +25,7 @@ import type {
   WeekStart,
   WorkLog,
 } from '@/types';
+import { validateDebtProject } from '@/utils';
 
 export type ToastType = 'success' | 'info' | 'warning' | 'danger';
 
@@ -50,7 +53,8 @@ type AppContextValue = {
   setSummaryDisplayPreference: (key: SummaryMetricKey, value: SummaryDisplayMode) => void;
   locale: string;
   t: (key: string, params?: Record<string, string | number>) => string;
-  projects: Project[];
+  projects: IncomeProject[];
+  managedProjects: Project[];
   workLogs: WorkLog[];
   holidayDates: string[];
   activeToast: AppToast | null;
@@ -81,9 +85,11 @@ const DEFAULT_SUMMARY_DISPLAY_PREFERENCES: SummaryDisplayPreferences = {
   projection: 'hours',
 };
 const DEFAULT_SUMMARY_DISPLAY_PRESET: SummaryDisplayPreset = 'hours';
-type StoredProject = Partial<Project> & {
-  payday?: string;
-};
+type StoredProject = Partial<Omit<IncomeProject, 'projectKind'>> &
+  Partial<Omit<DebtProject, 'projectKind'>> & {
+    projectKind?: 'income' | 'debt';
+    payday?: string;
+  };
 
 function roundToTwoDecimals(value: number) {
   return Number(value.toFixed(2));
@@ -127,11 +133,7 @@ function normalizeProjectColor(value?: string | null): ProjectColor | null {
   return PROJECT_COLOR_OPTIONS.includes(value as ProjectColor) ? (value as ProjectColor) : null;
 }
 
-function normalizePaymentRule(
-  paymentRule?: Partial<PaymentRule> | null,
-  legacyPayday?: string,
-  fallbackDate?: string,
-): PaymentRule | undefined {
+function normalizePaymentRule(paymentRule?: Partial<PaymentRule> | null, legacyPayday?: string, fallbackDate?: string): PaymentRule | undefined {
   if (paymentRule?.type === 'one_time' && isValidDateKey(paymentRule.paymentDate)) {
     const paymentDate = paymentRule.paymentDate.trim();
 
@@ -194,11 +196,46 @@ function normalizePaymentRule(
   return undefined;
 }
 
+function normalizeOptionalPositiveNumber(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0 ? roundToTwoDecimals(numberValue) : undefined;
+}
+
 function normalizeProject(project: StoredProject): Project {
   const normalizedStartDate = project.startDate?.trim() ?? '';
 
+  if (project.projectKind === 'debt') {
+    return {
+      id: project.id ?? createId('project'),
+      projectKind: 'debt',
+      name: project.name?.trim() ?? '',
+      currency: project.currency === 'USD' ? 'USD' : DEFAULT_PROJECT_CURRENCY,
+      startDate: normalizedStartDate,
+      debtType: project.debtType ?? 'other',
+      creditorType: project.creditorType ?? 'company',
+      creditorName: project.creditorName?.trim() ?? '',
+      principalAmount: roundToTwoDecimals(Number(project.principalAmount ?? 0)),
+      finalAmount: roundToTwoDecimals(Number(project.finalAmount ?? 0)),
+      endDate: project.endDate?.trim() ?? normalizedStartDate,
+      installmentCount:
+        typeof project.installmentCount === 'number' && Number.isInteger(project.installmentCount) && project.installmentCount > 0
+          ? project.installmentCount
+          : undefined,
+      paymentFrequency: project.paymentFrequency ?? 'monthly',
+      manualPayment: project.manualPayment ?? false,
+      installmentAmount: normalizeOptionalPositiveNumber(project.installmentAmount),
+      interestRate:
+        typeof project.interestRate === 'number' && Number.isFinite(project.interestRate) && project.interestRate >= 0
+          ? roundToTwoDecimals(project.interestRate)
+          : undefined,
+      notes: project.notes?.trim() || undefined,
+      status: project.status ?? 'active',
+    };
+  }
+
   return {
     id: project.id ?? createId('project'),
+    projectKind: 'income',
     name: project.name?.trim() ?? '',
     hourlyRate: Number(project.hourlyRate ?? 0),
     currency: project.currency === 'USD' ? 'USD' : DEFAULT_PROJECT_CURRENCY,
@@ -211,9 +248,7 @@ function normalizeProject(project: StoredProject): Project {
   };
 }
 
-function normalizeSummaryDisplayPreferences(
-  preferences?: Partial<Record<SummaryMetricKey, SummaryDisplayMode>>,
-): SummaryDisplayPreferences {
+function normalizeSummaryDisplayPreferences(preferences?: Partial<Record<SummaryMetricKey, SummaryDisplayMode>>): SummaryDisplayPreferences {
   return {
     today: preferences?.today === 'earnings' ? 'earnings' : 'hours',
     week: preferences?.week === 'earnings' ? 'earnings' : 'hours',
@@ -229,9 +264,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [language, setLanguage] = useState<AppLanguage>('en');
   const [weekStart, setWeekStart] = useState<WeekStart>('monday');
   const [summaryDisplayPreset, setSummaryDisplayPreset] = useState<SummaryDisplayPreset>(DEFAULT_SUMMARY_DISPLAY_PRESET);
-  const [summaryDisplayPreferences, setSummaryDisplayPreferences] = useState<SummaryDisplayPreferences>(
-    DEFAULT_SUMMARY_DISPLAY_PREFERENCES,
-  );
+  const [summaryDisplayPreferences, setSummaryDisplayPreferences] = useState<SummaryDisplayPreferences>(DEFAULT_SUMMARY_DISPLAY_PREFERENCES);
   const [projects, setProjects] = useState<Project[]>(initialProjects);
   const [workLogs, setWorkLogs] = useState<WorkLog[]>(initialWorkLogs);
   const [holidayDates, setHolidayDates] = useState<string[]>(initialHolidayDates);
@@ -278,9 +311,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
         if (storedSummaryDisplayPreferences) {
           setSummaryDisplayPreferences(
-            normalizeSummaryDisplayPreferences(
-              JSON.parse(storedSummaryDisplayPreferences) as Partial<Record<SummaryMetricKey, SummaryDisplayMode>>,
-            ),
+            normalizeSummaryDisplayPreferences(JSON.parse(storedSummaryDisplayPreferences) as Partial<Record<SummaryMetricKey, SummaryDisplayMode>>),
           );
         }
 
@@ -379,6 +410,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   const dismissToast = useCallback(() => {
     setActiveToast(null);
   }, []);
+  const incomeProjects = useMemo(() => projects.filter(isIncomeProject), [projects]);
 
   const value = useMemo<AppContextValue>(
     () => ({
@@ -405,20 +437,41 @@ export function AppProvider({ children }: PropsWithChildren) {
       },
       locale,
       t: (key, params) => translate(language, key, params),
-      projects,
+      projects: incomeProjects,
+      managedProjects: projects,
       workLogs,
       holidayDates,
       activeToast,
       showToast,
       dismissToast,
       toggleHoliday: (date) => {
-        setHolidayDates((currentDates) =>
-          currentDates.includes(date)
-            ? currentDates.filter((currentDate) => currentDate !== date)
-            : [...currentDates, date],
-        );
+        setHolidayDates((currentDates) => (currentDates.includes(date) ? currentDates.filter((currentDate) => currentDate !== date) : [...currentDates, date]));
       },
-      createProject: ({ name, hourlyRate, currency, contractType, startDate, color, paymentRule, weeklyEstimation, contractFile }) => {
+      createProject: (input) => {
+        if (input.projectKind === 'debt') {
+          if (validateDebtProject(input)) {
+            return null;
+          }
+
+          const newDebt: DebtProject = {
+            ...input,
+            id: createId('project'),
+            name: input.name.trim(),
+            creditorName: input.creditorName.trim(),
+            startDate: input.startDate.trim(),
+            endDate: input.endDate.trim(),
+            principalAmount: roundToTwoDecimals(input.principalAmount),
+            finalAmount: roundToTwoDecimals(input.finalAmount),
+            installmentAmount: normalizeOptionalPositiveNumber(input.installmentAmount),
+            interestRate: input.interestRate === undefined ? undefined : roundToTwoDecimals(input.interestRate),
+            notes: input.notes?.trim() || undefined,
+          };
+
+          setProjects((currentProjects) => [...currentProjects, newDebt]);
+          return newDebt;
+        }
+
+        const { name, hourlyRate, currency, contractType, startDate, color, paymentRule, weeklyEstimation, contractFile } = input;
         const normalizedName = name.trim();
         const normalizedStartDate = startDate.trim();
         const normalizedColor = normalizeProjectColor(color);
@@ -428,8 +481,9 @@ export function AppProvider({ children }: PropsWithChildren) {
           return null;
         }
 
-        const newProject: Project = {
+        const newProject: IncomeProject = {
           id: createId('project'),
+          projectKind: 'income',
           name: normalizedName,
           hourlyRate: roundToTwoDecimals(hourlyRate),
           currency,
@@ -446,37 +500,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         return newProject;
       },
       updateProject: (id, updates) => {
-        setProjects((currentProjects) =>
-          currentProjects.map((project) => {
-            if (project.id !== id) {
-              return project;
-            }
+        if (updates.projectKind === 'debt' && validateDebtProject(updates)) {
+          return;
+        }
 
-            const nextStartDate = updates.startDate?.trim() || project.startDate;
-            const normalizedPaymentRule =
-              updates.paymentRule === undefined
-                ? project.paymentRule
-                : normalizePaymentRule(updates.paymentRule, undefined, nextStartDate) ?? project.paymentRule;
-
-            return {
-              ...project,
-              ...updates,
-              hourlyRate:
-                typeof updates.hourlyRate === 'number'
-                  ? roundToTwoDecimals(updates.hourlyRate)
-                  : project.hourlyRate,
-              currency: updates.currency ?? project.currency,
-              startDate: nextStartDate,
-              color: updates.color === undefined ? project.color : normalizeProjectColor(updates.color),
-              paymentRule: normalizedPaymentRule,
-              name: updates.name?.trim() || project.name,
-              weeklyEstimation:
-                updates.weeklyEstimation === undefined
-                  ? project.weeklyEstimation
-                  : normalizeWeeklyEstimation(updates.weeklyEstimation),
-            };
-          }),
-        );
+        const normalizedProject = normalizeProject({ id, ...updates });
+        setProjects((currentProjects) => currentProjects.map((project) => (project.id === id ? normalizedProject : project)));
       },
       deleteProject: (id) => {
         setProjects((currentProjects) => currentProjects.filter((project) => project.id !== id));
@@ -507,10 +536,7 @@ export function AppProvider({ children }: PropsWithChildren) {
             return {
               ...log,
               ...updates,
-              hoursWorked:
-                typeof updates.hoursWorked === 'number'
-                  ? roundToTwoDecimals(updates.hoursWorked)
-                  : log.hoursWorked,
+              hoursWorked: typeof updates.hoursWorked === 'number' ? roundToTwoDecimals(updates.hoursWorked) : log.hoursWorked,
             };
           }),
         );
@@ -530,6 +556,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       dismissToast,
       isHeaderCompact,
       isHydrated,
+      incomeProjects,
       language,
       locale,
       projects,

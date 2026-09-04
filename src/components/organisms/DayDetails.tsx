@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useAppContext } from '@/context';
-import type { Project, WorkLog } from '@/types';
+import type { IncomeProject, WorkLog } from '@/types';
 import { useAppTheme } from '@/theme';
 import { calculateDailyEarnings, formatCurrency, formatLongDate, isPaydayForProject, parseDecimalInput } from '@/utils';
 
@@ -13,7 +13,7 @@ import { AppText } from '../atoms/AppText';
 const MAX_HOURS_PER_DAY = 24;
 
 type ProjectChipsProps = {
-  projects: Project[];
+  projects: IncomeProject[];
   selectedDate: string;
   selectedProjectId: string;
   onSelect: (projectId: string) => void;
@@ -21,7 +21,7 @@ type ProjectChipsProps = {
 
 export type DayDetailsProps = {
   selectedDate: string;
-  projects: Project[];
+  projects: IncomeProject[];
   dayLogs: WorkLog[];
   isHoliday: boolean;
   selectedProjectId: string;
@@ -107,14 +107,8 @@ export function DayDetails({
 }: DayDetailsProps) {
   const { locale, t } = useAppContext();
   const theme = useAppTheme();
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.id === selectedProjectId),
-    [projects, selectedProjectId],
-  );
-  const currentLog = useMemo(
-    () => dayLogs.find((log) => log.projectId === selectedProjectId),
-    [dayLogs, selectedProjectId],
-  );
+  const selectedProject = useMemo(() => projects.find((project) => project.id === selectedProjectId), [projects, selectedProjectId]);
+  const currentLog = useMemo(() => dayLogs.find((log) => log.projectId === selectedProjectId), [dayLogs, selectedProjectId]);
   const [hoursValue, setHoursValue] = useState('');
 
   useEffect(() => {
@@ -132,11 +126,9 @@ export function DayDetails({
     () => dayLogs.reduce((total, log) => (log.projectId === selectedProjectId ? total : total + log.hoursWorked), 0),
     [dayLogs, selectedProjectId],
   );
-  const wouldExceedDailyLimit =
-    parsedHours !== null && parsedHours > 0 && otherProjectsHours + parsedHours > MAX_HOURS_PER_DAY;
+  const wouldExceedDailyLimit = parsedHours !== null && parsedHours > 0 && otherProjectsHours + parsedHours > MAX_HOURS_PER_DAY;
   const canSave = Boolean(selectedProjectId) && parsedHours !== null && parsedHours >= 0 && !wouldExceedDailyLimit;
-  const currentEarnings =
-    currentLog && selectedProject ? calculateDailyEarnings(currentLog, selectedProject) : 0;
+  const currentEarnings = currentLog && selectedProject ? calculateDailyEarnings(currentLog, selectedProject) : 0;
   const saveButtonLabel = currentLog ? t('common.update') : t('day.saveHours');
   const clearButtonLabel = currentLog ? t('common.delete') : t('common.clear');
 
@@ -172,12 +164,7 @@ export function DayDetails({
       ) : (
         <>
           <View style={styles.selectionRow}>
-            <ProjectChips
-              projects={projects}
-              selectedDate={selectedDate}
-              selectedProjectId={selectedProjectId}
-              onSelect={onSelectProject}
-            />
+            <ProjectChips projects={projects} selectedDate={selectedDate} selectedProjectId={selectedProjectId} onSelect={onSelectProject} />
             <View style={styles.selectionSidebar}>
               <Pressable
                 onPress={onToggleHoliday}
@@ -205,13 +192,7 @@ export function DayDetails({
             <AppText variant="bodySmall" color="muted">
               {t('day.hoursToday')}
             </AppText>
-            <AppInput
-              keyboardType="decimal-pad"
-              onBlur={commitHours}
-              onChangeText={setHoursValue}
-              placeholder="0"
-              value={hoursValue}
-            />
+            <AppInput keyboardType="decimal-pad" onBlur={commitHours} onChangeText={setHoursValue} placeholder="0" value={hoursValue} />
             {wouldExceedDailyLimit ? (
               <AppText color="danger" variant="bodySmall">
                 {t('day.maxHoursPerDay')}
@@ -222,23 +203,21 @@ export function DayDetails({
           <View style={styles.inlineMeta}>
             <AppText color="muted">
               {selectedProject
-                ? t('day.rate', { value: formatCurrency(selectedProject.hourlyRate, locale, selectedProject.currency) })
+                ? t('day.rate', {
+                    value: formatCurrency(selectedProject.hourlyRate, locale, selectedProject.currency),
+                  })
                 : t('day.selectProject')}
             </AppText>
             <AppText color="muted">
-              {t('day.earned', { value: formatCurrency(currentEarnings, locale, selectedProject?.currency ?? 'EUR') })}
+              {t('day.earned', {
+                value: formatCurrency(currentEarnings, locale, selectedProject?.currency ?? 'EUR'),
+              })}
             </AppText>
           </View>
 
           <View style={styles.buttonRow}>
             <AppButton title={saveButtonLabel} onPress={commitHours} disabled={!canSave} fullWidth={false} />
-            <AppButton
-              title={clearButtonLabel}
-              onPress={() => onClearHours(selectedProjectId)}
-              variant="secondary"
-              fullWidth={false}
-              disabled={!currentLog}
-            />
+            <AppButton title={clearButtonLabel} onPress={() => onClearHours(selectedProjectId)} variant="secondary" fullWidth={false} disabled={!currentLog} />
           </View>
         </>
       )}
