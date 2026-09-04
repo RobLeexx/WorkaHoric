@@ -83,6 +83,8 @@ test('validates the debt CRUD business rules', () => {
   assert.deepEqual(calculateMonthlyCashFlow({ EUR: 810, USD: 100 }, { EUR: 250, USD: 125 }), {
     incomesByCurrency: { EUR: 810, USD: 100 },
     debtsByCurrency: { EUR: 250, USD: 125 },
+    expensesByCurrency: { EUR: 0, USD: 0 },
+    outgoingsByCurrency: { EUR: 250, USD: 125 },
     netByCurrency: { EUR: 560, USD: -25 },
   });
 

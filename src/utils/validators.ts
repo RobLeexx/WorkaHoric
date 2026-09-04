@@ -1,4 +1,4 @@
-import type { CreateDebtProjectInput } from '@/types';
+import type { CreateDebtProjectInput, CreateExpenseProjectInput } from '@/types';
 
 export function isEmailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -70,6 +70,28 @@ export function validateDebtProject(input: CreateDebtProjectInput): DebtValidati
 
   if (input.interestRate !== undefined && (!Number.isFinite(input.interestRate) || input.interestRate < 0)) {
     return 'interestRate';
+  }
+
+  return null;
+}
+
+export type ExpenseValidationError = 'required' | 'amount' | 'validityDays' | 'dateRange';
+
+export function validateExpenseProject(input: CreateExpenseProjectInput): ExpenseValidationError | null {
+  if (!input.name.trim() || !input.providerName.trim() || !isIsoDateString(input.startDate)) {
+    return 'required';
+  }
+
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    return 'amount';
+  }
+
+  if (input.recurrenceType === 'every_n_days' && (!Number.isInteger(input.validityDays) || (input.validityDays ?? 0) <= 0)) {
+    return 'validityDays';
+  }
+
+  if (input.endDate && (!isIsoDateString(input.endDate) || input.endDate < input.startDate)) {
+    return 'dateRange';
   }
 
   return null;

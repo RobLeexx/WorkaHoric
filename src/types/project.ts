@@ -1,6 +1,6 @@
 import type { CurrencyCode } from './app';
 
-export type ProjectKind = 'income' | 'debt';
+export type ProjectKind = 'income' | 'debt' | 'expense';
 export type ContractType = 'hourly' | 'temporary' | 'part-time' | 'full-time' | 'freelance';
 export type WeekdayEstimationKey = 'monHours' | 'tueHours' | 'wedHours' | 'thuHours' | 'friHours' | 'satHours' | 'sunHours';
 
@@ -13,6 +13,10 @@ export type DebtType = 'financing' | 'personal_loan' | 'bank_loan' | 'credit' | 
 export type CreditorType = 'company' | 'person';
 export type PaymentFrequency = 'weekly' | 'biweekly' | 'monthly' | 'custom';
 export type DebtStatus = 'active' | 'completed' | 'paused';
+export type ExpenseType = 'transport' | 'subscription' | 'rent' | 'utilities' | 'insurance' | 'phone' | 'internet' | 'membership' | 'software' | 'purchase' | 'other';
+export type ExpenseProviderType = 'company' | 'person' | 'government' | 'other';
+export type ExpenseRecurrenceType = 'one_time' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | 'every_n_days';
+export type ExpenseStatus = 'active' | 'paused' | 'completed';
 
 export type OneTimePaymentRule = {
   type: 'one_time';
@@ -79,10 +83,24 @@ export type DebtProject = BaseProject & {
   status: DebtStatus;
 };
 
-export type Project = IncomeProject | DebtProject;
+export type ExpenseProject = BaseProject & {
+  projectKind: 'expense';
+  expenseType: ExpenseType;
+  providerType: ExpenseProviderType;
+  providerName: string;
+  amount: number;
+  recurrenceType: ExpenseRecurrenceType;
+  validityDays?: number;
+  endDate?: string;
+  status: ExpenseStatus;
+  notes?: string;
+};
+
+export type Project = IncomeProject | DebtProject | ExpenseProject;
 export type CreateIncomeProjectInput = Omit<IncomeProject, 'id'>;
 export type CreateDebtProjectInput = Omit<DebtProject, 'id'>;
-export type CreateProjectInput = CreateIncomeProjectInput | CreateDebtProjectInput;
+export type CreateExpenseProjectInput = Omit<ExpenseProject, 'id'>;
+export type CreateProjectInput = CreateIncomeProjectInput | CreateDebtProjectInput | CreateExpenseProjectInput;
 export type UpdateProjectInput = CreateProjectInput;
 
 export function isIncomeProject(project: Project): project is IncomeProject {
@@ -91,4 +109,8 @@ export function isIncomeProject(project: Project): project is IncomeProject {
 
 export function isDebtProject(project: Project): project is DebtProject {
   return project.projectKind === 'debt';
+}
+
+export function isExpenseProject(project: Project): project is ExpenseProject {
+  return project.projectKind === 'expense';
 }

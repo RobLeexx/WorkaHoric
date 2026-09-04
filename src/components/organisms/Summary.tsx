@@ -58,9 +58,9 @@ function formatHours(value: number) {
 function FinancialSummaryItem({ monthlyCashFlow, monthName }: FinancialSummaryItemProps) {
   const { locale, t } = useAppContext();
   const theme = useAppTheme();
-  const [kind, setKind] = useState<'net' | 'income' | 'debt'>('net');
-  const totals = kind === 'net' ? monthlyCashFlow.netByCurrency : kind === 'income' ? monthlyCashFlow.incomesByCurrency : monthlyCashFlow.debtsByCurrency;
-  const label = t(`summary.${kind === 'net' ? 'monthProjectionMoney' : kind === 'income' ? 'monthProjectionIncomes' : 'monthProjectionDebts'}`, {
+  const [kind, setKind] = useState<'net' | 'income' | 'expense'>('net');
+  const totals = kind === 'net' ? monthlyCashFlow.netByCurrency : kind === 'income' ? monthlyCashFlow.incomesByCurrency : monthlyCashFlow.outgoingsByCurrency;
+  const label = t(`summary.${kind === 'net' ? 'monthProjectionMoney' : kind === 'income' ? 'monthProjectionIncomes' : 'monthProjectionExpenses'}`, {
     month: monthName,
   });
   const entries = Object.entries(totals) as [string, number][];
@@ -69,7 +69,7 @@ function FinancialSummaryItem({ monthlyCashFlow, monthName }: FinancialSummaryIt
     <View style={[styles.item, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
       <Pressable
         accessibilityRole="button"
-        onPress={() => setKind((current) => (current === 'net' ? 'income' : current === 'income' ? 'debt' : 'net'))}
+        onPress={() => setKind((current) => (current === 'net' ? 'income' : current === 'income' ? 'expense' : 'net'))}
         style={styles.itemContent}
       >
         <AppText variant="bodySmall" color="muted">
@@ -81,7 +81,7 @@ function FinancialSummaryItem({ monthlyCashFlow, monthName }: FinancialSummaryIt
           </AppText>
         ) : (
           entries.map(([currency, amount]) => {
-            const signedAmount = kind === 'debt' ? -amount : amount;
+            const signedAmount = kind === 'expense' ? -amount : amount;
             const sign = signedAmount > 0 ? '+' : signedAmount < 0 ? '-' : '';
             const color = signedAmount > 0 ? theme.colors.primary : signedAmount < 0 ? theme.colors.danger : theme.colors.text;
 

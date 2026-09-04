@@ -9,6 +9,7 @@ import type {
   CreateProjectInput,
   CreateWorkLogInput,
   DebtProject,
+  ExpenseProject,
   IncomeProject,
   PaymentRule,
   PaymentWeekday,
@@ -25,7 +26,7 @@ import type {
   WeekStart,
   WorkLog,
 } from '@/types';
-import { validateDebtProject } from '@/utils';
+import { validateDebtProject, validateExpenseProject } from '@/utils';
 
 export type ToastType = 'success' | 'info' | 'warning' | 'danger';
 
@@ -86,8 +87,9 @@ const DEFAULT_SUMMARY_DISPLAY_PREFERENCES: SummaryDisplayPreferences = {
 };
 const DEFAULT_SUMMARY_DISPLAY_PRESET: SummaryDisplayPreset = 'hours';
 type StoredProject = Partial<Omit<IncomeProject, 'projectKind'>> &
-  Partial<Omit<DebtProject, 'projectKind'>> & {
-    projectKind?: 'income' | 'debt';
+  Partial<Omit<DebtProject, 'projectKind'>> &
+  Partial<Omit<ExpenseProject, 'projectKind'>> & {
+    projectKind?: 'income' | 'debt' | 'expense';
     payday?: string;
   };
 
@@ -232,6 +234,29 @@ function normalizeProject(project: StoredProject): Project {
           : undefined,
       notes: project.notes?.trim() || undefined,
       status: project.status ?? 'active',
+    };
+  }
+
+  if (project.projectKind === 'expense') {
+    return {
+      id: project.id ?? createId('project'),
+      projectKind: 'expense',
+      name: project.name?.trim() ?? '',
+      currency: project.currency === 'USD' ? 'USD' : DEFAULT_PROJECT_CURRENCY,
+      startDate: normalizedStartDate,
+      color: normalizeProjectColor(project.color),
+      expenseType: project.expenseType ?? 'other',
+      providerType: project.providerType ?? 'other',
+      providerName: project.providerName?.trim() ?? '',
+      amount: roundToTwoDecimals(Number(project.amount ?? 0)),
+      recurrenceType: project.recurrenceType ?? 'one_time',
+      validityDays:
+        typeof project.validityDays === 'number' && Number.isInteger(project.validityDays) && project.validityDays > 0
+          ? project.validityDays
+          : undefined,
+      endDate: project.endDate?.trim() || undefined,
+      status: project.status ?? 'active',
+      notes: project.notes?.trim() || undefined,
     };
   }
 
@@ -475,6 +500,27 @@ export function AppProvider({ children }: PropsWithChildren) {
           return newDebt;
         }
 
+        if (input.projectKind === 'expense') {
+          if (validateExpenseProject(input)) {
+            return null;
+          }
+
+          const newExpense: ExpenseProject = {
+            ...input,
+            id: createId('project'),
+            name: input.name.trim(),
+            providerName: input.providerName.trim(),
+            startDate: input.startDate.trim(),
+            color: normalizeProjectColor(input.color),
+            amount: roundToTwoDecimals(input.amount),
+            endDate: input.endDate?.trim() || undefined,
+            notes: input.notes?.trim() || undefined,
+          };
+
+          setProjects((currentProjects) => [...currentProjects, newExpense]);
+          return newExpense;
+        }
+
         const { name, hourlyRate, currency, contractType, startDate, color, paymentRule, weeklyEstimation, contractFile } = input;
         const normalizedName = name.trim();
         const normalizedStartDate = startDate.trim();
@@ -504,7 +550,10 @@ export function AppProvider({ children }: PropsWithChildren) {
         return newProject;
       },
       updateProject: (id, updates) => {
-        if (updates.projectKind === 'debt' && validateDebtProject(updates)) {
+        if (
+          (updates.projectKind === 'debt' && validateDebtProject(updates)) ||
+          (updates.projectKind === 'expense' && validateExpenseProject(updates))
+        ) {
           return;
         }
 

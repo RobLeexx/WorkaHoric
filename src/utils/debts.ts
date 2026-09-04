@@ -19,6 +19,8 @@ export type DebtPayment = {
 export type MonthlyCashFlow = {
   incomesByCurrency: CurrencyTotals;
   debtsByCurrency: CurrencyTotals;
+  expensesByCurrency: CurrencyTotals;
+  outgoingsByCurrency: CurrencyTotals;
   netByCurrency: CurrencyTotals;
 };
 
@@ -166,19 +168,31 @@ export function getDebtTotalsByCurrency(payments: DebtPayment[]) {
 export function calculateMonthlyCashFlow(
   incomesByCurrency: CurrencyTotals,
   debtsByCurrency: CurrencyTotals,
+  expensesByCurrency: CurrencyTotals = {},
 ): MonthlyCashFlow {
   const currencies = new Set<CurrencyCode>([
     ...(Object.keys(incomesByCurrency) as CurrencyCode[]),
     ...(Object.keys(debtsByCurrency) as CurrencyCode[]),
+    ...(Object.keys(expensesByCurrency) as CurrencyCode[]),
   ]);
-  const result: MonthlyCashFlow = { incomesByCurrency: {}, debtsByCurrency: {}, netByCurrency: {} };
+  const result: MonthlyCashFlow = {
+    incomesByCurrency: {},
+    debtsByCurrency: {},
+    expensesByCurrency: {},
+    outgoingsByCurrency: {},
+    netByCurrency: {},
+  };
 
   currencies.forEach((currency) => {
     const incomeCents = toCents(incomesByCurrency[currency] ?? 0);
     const debtCents = toCents(debtsByCurrency[currency] ?? 0);
+    const expenseCents = toCents(expensesByCurrency[currency] ?? 0);
+    const outgoingCents = debtCents + expenseCents;
     result.incomesByCurrency[currency] = fromCents(incomeCents);
     result.debtsByCurrency[currency] = fromCents(debtCents);
-    result.netByCurrency[currency] = fromCents(incomeCents - debtCents);
+    result.expensesByCurrency[currency] = fromCents(expenseCents);
+    result.outgoingsByCurrency[currency] = fromCents(outgoingCents);
+    result.netByCurrency[currency] = fromCents(incomeCents - outgoingCents);
   });
 
   return result;

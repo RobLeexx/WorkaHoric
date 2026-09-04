@@ -5,7 +5,7 @@ import { AppButton, AppText, DayDetails, MainLayout, Summary, WorkCalendar } fro
 import { useAppContext } from '@/context';
 import { useProjects, useWorkLogs } from '@/hooks';
 import { useAppTheme } from '@/theme';
-import { isDebtProject } from '@/types';
+import { isDebtProject, isExpenseProject } from '@/types';
 import {
   addMonths,
   calculateMonthlyCashFlow,
@@ -13,6 +13,8 @@ import {
   fromDateKey,
   getDebtPaymentsForMonth,
   getDebtTotalsByCurrency,
+  getExpenseOccurrencesForMonth,
+  getExpenseTotalsByCurrency,
   getPaymentIndicatorsForMonth,
   toDateKey,
 } from '@/utils';
@@ -43,7 +45,12 @@ export function HomeScreen() {
     monthlyEarningsByCurrency,
   } = useWorkLogs(selectedDate);
   const debtProjects = useMemo(() => managedProjects.filter(isDebtProject), [managedProjects]);
+  const expenseProjects = useMemo(() => managedProjects.filter(isExpenseProject), [managedProjects]);
   const debtPayments = useMemo(() => getDebtPaymentsForMonth(debtProjects, visibleMonth), [debtProjects, visibleMonth]);
+  const expenseOccurrences = useMemo(
+    () => getExpenseOccurrencesForMonth(expenseProjects, visibleMonth),
+    [expenseProjects, visibleMonth],
+  );
   const paymentIndicators = useMemo(
     () => getPaymentIndicatorsForMonth(projects, debtPayments, visibleMonth),
     [debtPayments, projects, visibleMonth],
@@ -54,8 +61,13 @@ export function HomeScreen() {
     [holidayDates, projects, visibleMonth, workLogs],
   );
   const monthlyCashFlow = useMemo(
-    () => calculateMonthlyCashFlow(monthlyProjection.totalProjectedEarningsByCurrency, getDebtTotalsByCurrency(debtPayments)),
-    [debtPayments, monthlyProjection.totalProjectedEarningsByCurrency],
+    () =>
+      calculateMonthlyCashFlow(
+        monthlyProjection.totalProjectedEarningsByCurrency,
+        getDebtTotalsByCurrency(debtPayments),
+        getExpenseTotalsByCurrency(expenseOccurrences),
+      ),
+    [debtPayments, expenseOccurrences, monthlyProjection.totalProjectedEarningsByCurrency],
   );
   const selectedDebtPayments = useMemo(() => debtPayments.filter((payment) => payment.date === selectedDate), [debtPayments, selectedDate]);
 

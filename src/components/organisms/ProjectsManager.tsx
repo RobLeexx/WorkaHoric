@@ -8,10 +8,15 @@ import type {
   ContractFile,
   ContractType,
   CreateDebtProjectInput,
+  CreateExpenseProjectInput,
   CreateProjectInput,
   CurrencyCode,
   DebtStatus,
   DebtType,
+  ExpenseProviderType,
+  ExpenseRecurrenceType,
+  ExpenseStatus,
+  ExpenseType,
   PaymentFrequency,
   PaymentRule,
   PaymentType,
@@ -24,7 +29,7 @@ import type {
   WeeklyEstimation,
 } from '@/types';
 import { useAppTheme } from '@/theme';
-import { deriveDebtPlan, formatCurrency, formatDate, fromDateKey, hasWeeklyEstimation, parseDecimalInput, toDateKey, validateDebtProject } from '@/utils';
+import { deriveDebtPlan, formatCurrency, formatDate, fromDateKey, hasWeeklyEstimation, parseDecimalInput, toDateKey, validateDebtProject, validateExpenseProject } from '@/utils';
 
 import { AppButton } from '../atoms/AppButton';
 import { AppInput } from '../atoms/AppInput';
@@ -34,11 +39,15 @@ import { DateField } from '../molecules/DateField';
 const CONTRACT_TYPES: ContractType[] = ['hourly', 'temporary', 'part-time', 'full-time', 'freelance'];
 const CURRENCIES: CurrencyCode[] = ['EUR', 'USD'];
 const PAYMENT_TYPES: PaymentType[] = ['one_time', 'monthly_fixed_day', 'weekly', 'biweekly'];
-const PROJECT_KINDS: ProjectKind[] = ['income', 'debt'];
+const PROJECT_KINDS: ProjectKind[] = ['income', 'debt', 'expense'];
 const DEBT_TYPES: DebtType[] = ['financing', 'personal_loan', 'bank_loan', 'credit', 'mortgage', 'installment_purchase', 'other'];
 const CREDITOR_TYPES: CreditorType[] = ['company', 'person'];
 const PAYMENT_FREQUENCIES: PaymentFrequency[] = ['weekly', 'biweekly', 'monthly', 'custom'];
 const DEBT_STATUSES: DebtStatus[] = ['active', 'completed', 'paused'];
+const EXPENSE_TYPES: ExpenseType[] = ['transport', 'subscription', 'rent', 'utilities', 'insurance', 'phone', 'internet', 'membership', 'software', 'purchase', 'other'];
+const EXPENSE_PROVIDER_TYPES: ExpenseProviderType[] = ['company', 'person', 'government', 'other'];
+const EXPENSE_RECURRENCE_TYPES: ExpenseRecurrenceType[] = ['one_time', 'weekly', 'biweekly', 'monthly', 'yearly', 'every_n_days'];
+const EXPENSE_STATUSES: ExpenseStatus[] = ['active', 'paused', 'completed'];
 const PROJECT_COLOR_PRESETS: { value: ProjectColor; labelKey: string }[] = [
   { value: '#EF4444', labelKey: 'projects.red' },
   { value: '#F97316', labelKey: 'projects.orange' },
@@ -246,6 +255,51 @@ function buildDebtInput(name: string, currency: CurrencyCode, startDate: string,
   };
 }
 
+type ExpenseFormValues = {
+  expenseType: ExpenseType;
+  providerType: ExpenseProviderType;
+  providerName: string;
+  amount: string;
+  recurrenceType: ExpenseRecurrenceType;
+  validityDays: string;
+  endDate: string;
+  status: ExpenseStatus;
+  notes: string;
+};
+
+function createEmptyExpenseValues(): ExpenseFormValues {
+  return {
+    expenseType: 'other',
+    providerType: 'company',
+    providerName: '',
+    amount: '',
+    recurrenceType: 'monthly',
+    validityDays: '',
+    endDate: '',
+    status: 'active',
+    notes: '',
+  };
+}
+
+function buildExpenseInput(name: string, currency: CurrencyCode, startDate: string, color: ProjectColor | null, values: ExpenseFormValues): CreateExpenseProjectInput {
+  return {
+    projectKind: 'expense',
+    name,
+    currency,
+    startDate,
+    color,
+    expenseType: values.expenseType,
+    providerType: values.providerType,
+    providerName: values.providerName,
+    amount: parseDecimalInput(values.amount) ?? Number.NaN,
+    recurrenceType: values.recurrenceType,
+    validityDays: values.recurrenceType === 'every_n_days' && values.validityDays.trim() ? Number(values.validityDays) : undefined,
+    endDate: values.recurrenceType === 'one_time' ? undefined : values.endDate || undefined,
+    status: values.status,
+    notes: values.notes.trim() || undefined,
+  };
+}
+
 function getProjectFormDraft(values: ProjectFormValues) {
   return {
     projectKind: values.projectKind,
@@ -260,6 +314,7 @@ function getProjectFormDraft(values: ProjectFormValues) {
     weeklyEstimation: toWeeklyEstimationState(values.weeklyEstimation),
     contractFile: values.contractFile ?? null,
     debt: values.debt,
+    expense: values.expense,
   };
 }
 
@@ -287,6 +342,7 @@ type ProjectFormValues = {
   weeklyEstimation?: WeeklyEstimation;
   contractFile?: ContractFile;
   debt: DebtFormValues;
+  expense: ExpenseFormValues;
 };
 
 type ProjectFormProps = {
@@ -467,6 +523,7 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
   const [weeklyEstimation, setWeeklyEstimation] = useState<Record<WeekdayEstimationKey, string>>(toWeeklyEstimationState(initialValues.weeklyEstimation));
   const [contractFile, setContractFile] = useState<ContractFile | undefined>(initialValues.contractFile);
   const [debtValues, setDebtValues] = useState(initialValues.debt);
+  const [expenseValues, setExpenseValues] = useState(initialValues.expense);
   const initialDraft = getProjectFormDraft(initialValues);
 
   useEffect(() => {
@@ -483,6 +540,7 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
     setWeeklyEstimation(toWeeklyEstimationState(initialValues.weeklyEstimation));
     setContractFile(initialValues.contractFile);
     setDebtValues(initialValues.debt);
+    setExpenseValues(initialValues.expense);
   }, [
     initialValues.color,
     initialValues.contractFile,
@@ -495,6 +553,7 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
     initialValues.startDate,
     initialValues.weeklyEstimation,
     initialValues.debt,
+    initialValues.expense,
   ]);
 
   const parsedRate = parseDecimalInput(hourlyRate);
@@ -513,10 +572,17 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
     [currency, debtValues, name, selectedColor, startDate],
   );
   const debtValidationError = validateDebtProject(debtInput);
+  const expenseInput = useMemo(
+    () => buildExpenseInput(name, currency, startDate, selectedColor, expenseValues),
+    [currency, expenseValues, name, selectedColor, startDate],
+  );
+  const expenseValidationError = validateExpenseProject(expenseInput);
   const canSubmit =
     projectKind === 'income'
       ? Boolean(name.trim()) && parsedRate !== null && parsedRate > 0 && Boolean(startDate) && Boolean(paymentRule)
-      : debtValidationError === null;
+      : projectKind === 'debt'
+        ? debtValidationError === null
+        : expenseValidationError === null;
   const selectedColorOption = PROJECT_COLOR_PRESETS.find((option) => option.value === selectedColor);
   const currentDraft = useMemo(
     () => ({
@@ -532,12 +598,14 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
       weeklyEstimation,
       contractFile: contractFile ?? null,
       debt: debtValues,
+      expense: expenseValues,
     }),
     [
       contractFile,
       contractType,
       currency,
       debtValues,
+      expenseValues,
       hourlyRate,
       isEstimationOpen,
       name,
@@ -561,6 +629,11 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
 
     if (projectKind === 'debt') {
       onSubmit(debtInput);
+      return true;
+    }
+
+    if (projectKind === 'expense') {
+      onSubmit(expenseInput);
       return true;
     }
 
@@ -589,6 +662,7 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
     contractType,
     currency,
     debtInput,
+    expenseInput,
     hasConfiguredEstimation,
     name,
     onSubmit,
@@ -927,7 +1001,7 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
               <ContractPreview contractFile={contractFile} />
             </View>
           </>
-        ) : (
+        ) : projectKind === 'debt' ? (
           <>
             <AppText weight="semibold">{t('projects.debtGeneral')}</AppText>
             <ChoiceSelector
@@ -1097,6 +1171,149 @@ const ProjectForm = forwardRef<ProjectFormHandle, ProjectFormProps>(function Pro
               </AppText>
             ) : null}
           </>
+        ) : (
+          <>
+            <AppText weight="semibold">{t('projects.expenseGeneral')}</AppText>
+            <ChoiceSelector
+              label={t('projects.expenseType')}
+              value={expenseValues.expenseType}
+              options={EXPENSE_TYPES}
+              onChange={(expenseType) => setExpenseValues((current) => ({ ...current, expenseType }))}
+            />
+            <ChoiceSelector
+              label={t('projects.providerType')}
+              value={expenseValues.providerType}
+              options={EXPENSE_PROVIDER_TYPES}
+              onChange={(providerType) => setExpenseValues((current) => ({ ...current, providerType }))}
+            />
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.providerName')}
+              </AppText>
+              <AppInput
+                value={expenseValues.providerName}
+                onChangeText={(providerName) => setExpenseValues((current) => ({ ...current, providerName }))}
+              />
+            </View>
+
+            <AppText weight="semibold">{t('projects.expenseAmount')}</AppText>
+            <AppInput
+              keyboardType="decimal-pad"
+              placeholder={t('projects.amount')}
+              value={expenseValues.amount}
+              onChangeText={(amount) => setExpenseValues((current) => ({ ...current, amount }))}
+            />
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.currency')}
+              </AppText>
+              <View style={styles.typeList}>
+                {CURRENCIES.map((option) => {
+                  const isSelected = option === currency;
+
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => setCurrency(option)}
+                      style={[
+                        styles.typeChip,
+                        {
+                          backgroundColor: isSelected ? theme.colors.primary : theme.colors.surfaceMuted,
+                          borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                        },
+                      ]}
+                    >
+                      <AppText color={isSelected ? 'inverse' : 'text'} variant="bodySmall" weight="semibold">
+                        {option}
+                      </AppText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <AppText weight="semibold">{t('projects.expenseSchedule')}</AppText>
+            <DateField label={t('projects.startDate')} onChange={setStartDate} value={startDate} />
+            <ChoiceSelector
+              label={t('projects.recurrence')}
+              value={expenseValues.recurrenceType}
+              options={EXPENSE_RECURRENCE_TYPES}
+              onChange={(recurrenceType) => setExpenseValues((current) => ({ ...current, recurrenceType }))}
+            />
+            {expenseValues.recurrenceType === 'every_n_days' ? (
+              <View style={styles.fieldBlock}>
+                <AppText variant="bodySmall" color="muted">
+                  {t('projects.validityDays')}
+                </AppText>
+                <AppInput
+                  keyboardType="number-pad"
+                  value={expenseValues.validityDays}
+                  onChangeText={(validityDays) => setExpenseValues((current) => ({ ...current, validityDays }))}
+                />
+              </View>
+            ) : null}
+            {expenseValues.recurrenceType !== 'one_time' ? (
+              <>
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: Boolean(expenseValues.endDate) }}
+                  onPress={() => setExpenseValues((current) => ({ ...current, endDate: current.endDate ? '' : startDate }))}
+                  style={styles.checkboxRow}
+                >
+                  <View
+                    style={[
+                      styles.checkbox,
+                      {
+                        backgroundColor: expenseValues.endDate ? theme.colors.primary : theme.colors.surfaceMuted,
+                        borderColor: expenseValues.endDate ? theme.colors.primary : theme.colors.borderStrong,
+                      },
+                    ]}
+                  >
+                    {expenseValues.endDate ? (
+                      <AppText color="inverse" variant="label" weight="bold">
+                        ✓
+                      </AppText>
+                    ) : null}
+                  </View>
+                  <AppText variant="bodySmall">{t('projects.endDate')}</AppText>
+                </Pressable>
+                {expenseValues.endDate ? (
+                  <DateField
+                    label={t('projects.endDate')}
+                    value={expenseValues.endDate}
+                    onChange={(endDate) => setExpenseValues((current) => ({ ...current, endDate }))}
+                  />
+                ) : null}
+              </>
+            ) : null}
+
+            <AppText weight="semibold">{t('projects.additional')}</AppText>
+            <ChoiceSelector
+              label={t('projects.status')}
+              value={expenseValues.status}
+              options={EXPENSE_STATUSES}
+              onChange={(status) => setExpenseValues((current) => ({ ...current, status }))}
+            />
+            <View style={styles.fieldBlock}>
+              <AppText variant="bodySmall" color="muted">
+                {t('projects.notes')}
+              </AppText>
+              <AppInput
+                multiline
+                numberOfLines={4}
+                placeholder={t('projects.optional')}
+                style={styles.notesInput}
+                textAlignVertical="top"
+                value={expenseValues.notes}
+                onChangeText={(notes) => setExpenseValues((current) => ({ ...current, notes }))}
+              />
+            </View>
+            {expenseValidationError ? (
+              <AppText color="danger" variant="bodySmall">
+                {t(`projects.expenseValidation.${expenseValidationError}`)}
+              </AppText>
+            ) : null}
+          </>
         )}
 
         <View style={styles.formActions}>
@@ -1206,51 +1423,86 @@ export function ProjectsManager({ projects, onCreateProject, onUpdateProject, on
       },
       weeklyEstimation: undefined,
       debt: createEmptyDebtValues(today),
+      expense: createEmptyExpenseValues(),
     };
   }, []);
   const editingProjectInitialValues = useMemo<ProjectFormValues | null>(
-    () =>
-      editingProject?.projectKind === 'income'
-        ? {
-            projectKind: 'income',
-            name: editingProject.name,
-            hourlyRate: String(editingProject.hourlyRate),
-            currency: editingProject.currency,
-            contractType: editingProject.contractType,
-            startDate: editingProject.startDate,
-            color: editingProject.color,
-            paymentRule: editingProject.paymentRule,
-            weeklyEstimation: editingProject.weeklyEstimation,
-            contractFile: editingProject.contractFile,
-            debt: createEmptyDebtValues(editingProject.startDate),
-          }
-        : editingProject
-          ? {
-              projectKind: 'debt',
-              name: editingProject.name,
-              hourlyRate: '',
-              currency: editingProject.currency,
-              contractType: 'hourly',
-              startDate: editingProject.startDate,
-              color: editingProject.color,
-              paymentRule: undefined,
-              weeklyEstimation: undefined,
-              contractFile: undefined,
-              debt: {
-                debtType: editingProject.debtType,
-                creditorType: editingProject.creditorType,
-                creditorName: editingProject.creditorName,
-                principalAmount: String(editingProject.principalAmount),
-                interestRate: String(editingProject.interestRate ?? 0),
-                paymentFrequency: editingProject.paymentFrequency,
-                manualPayment: editingProject.manualPayment,
-                installmentCount: editingProject.installmentCount === undefined ? '' : String(editingProject.installmentCount),
-                paymentStartDate: editingProject.paymentStartDate,
-                notes: editingProject.notes ?? '',
-                status: editingProject.status,
-              },
-            }
-          : null,
+    () => {
+      if (!editingProject) {
+        return null;
+      }
+
+      if (editingProject.projectKind === 'income') {
+        return {
+          projectKind: 'income',
+          name: editingProject.name,
+          hourlyRate: String(editingProject.hourlyRate),
+          currency: editingProject.currency,
+          contractType: editingProject.contractType,
+          startDate: editingProject.startDate,
+          color: editingProject.color,
+          paymentRule: editingProject.paymentRule,
+          weeklyEstimation: editingProject.weeklyEstimation,
+          contractFile: editingProject.contractFile,
+          debt: createEmptyDebtValues(editingProject.startDate),
+          expense: createEmptyExpenseValues(),
+        };
+      }
+
+      if (editingProject.projectKind === 'debt') {
+        return {
+          projectKind: 'debt',
+          name: editingProject.name,
+          hourlyRate: '',
+          currency: editingProject.currency,
+          contractType: 'hourly',
+          startDate: editingProject.startDate,
+          color: editingProject.color,
+          paymentRule: undefined,
+          weeklyEstimation: undefined,
+          contractFile: undefined,
+          debt: {
+            debtType: editingProject.debtType,
+            creditorType: editingProject.creditorType,
+            creditorName: editingProject.creditorName,
+            principalAmount: String(editingProject.principalAmount),
+            interestRate: String(editingProject.interestRate ?? 0),
+            paymentFrequency: editingProject.paymentFrequency,
+            manualPayment: editingProject.manualPayment,
+            installmentCount: editingProject.installmentCount === undefined ? '' : String(editingProject.installmentCount),
+            paymentStartDate: editingProject.paymentStartDate,
+            notes: editingProject.notes ?? '',
+            status: editingProject.status,
+          },
+          expense: createEmptyExpenseValues(),
+        };
+      }
+
+      return {
+        projectKind: 'expense',
+        name: editingProject.name,
+        hourlyRate: '',
+        currency: editingProject.currency,
+        contractType: 'hourly',
+        startDate: editingProject.startDate,
+        color: null,
+        paymentRule: undefined,
+        weeklyEstimation: undefined,
+        contractFile: undefined,
+        debt: createEmptyDebtValues(editingProject.startDate),
+        expense: {
+          expenseType: editingProject.expenseType,
+          providerType: editingProject.providerType,
+          providerName: editingProject.providerName,
+          amount: String(editingProject.amount),
+          recurrenceType: editingProject.recurrenceType,
+          validityDays: editingProject.validityDays === undefined ? '' : String(editingProject.validityDays),
+          endDate: editingProject.endDate ?? '',
+          status: editingProject.status,
+          notes: editingProject.notes ?? '',
+        },
+      };
+    },
     [editingProject],
   );
 
@@ -1422,7 +1674,7 @@ export function ProjectsManager({ projects, onCreateProject, onUpdateProject, on
                           style={[
                             styles.kindBadge,
                             {
-                              backgroundColor: project.projectKind === 'debt' ? theme.colors.warningSoft : theme.colors.primarySoft,
+                              backgroundColor: project.projectKind === 'income' ? theme.colors.primarySoft : theme.colors.warningSoft,
                             },
                           ]}
                         >
@@ -1430,7 +1682,7 @@ export function ProjectsManager({ projects, onCreateProject, onUpdateProject, on
                             variant="label"
                             weight="bold"
                             style={{
-                              color: project.projectKind === 'debt' ? theme.colors.warning : theme.colors.primary,
+                              color: project.projectKind === 'income' ? theme.colors.primary : project.projectKind === 'debt' ? theme.colors.warning : theme.colors.danger,
                             }}
                           >
                             {t(`projects.${project.projectKind}`)}
@@ -1445,7 +1697,9 @@ export function ProjectsManager({ projects, onCreateProject, onUpdateProject, on
                                 date: formatDate(fromDateKey(project.startDate), locale),
                               },
                             )}`
-                          : `${project.creditorName} | ${formatCurrency(project.finalAmount, locale, project.currency)} | ${t(`projects.${project.status}`)}`}
+                          : project.projectKind === 'debt'
+                            ? `${project.creditorName} | ${formatCurrency(project.finalAmount, locale, project.currency)} | ${t(`projects.${project.status}`)}`
+                            : `${project.providerName} | ${formatCurrency(project.amount, locale, project.currency)} | ${t(`projects.${project.status}`)}`}
                       </AppText>
                       {project.projectKind === 'income' && hasWeeklyEstimation(project) ? (
                         <AppText color="muted" variant="bodySmall">
@@ -1555,7 +1809,7 @@ export function ProjectsManager({ projects, onCreateProject, onUpdateProject, on
             </AppText>
             <AppText color="muted">
               {projectPendingDelete
-                ? t(projectPendingDelete.projectKind === 'debt' ? 'projects.deleteDebtBody' : 'projects.deleteBody', {
+                ? t(projectPendingDelete.projectKind === 'debt' ? 'projects.deleteDebtBody' : projectPendingDelete.projectKind === 'expense' ? 'projects.deleteExpenseBody' : 'projects.deleteBody', {
                     name: projectPendingDelete.name,
                   })
                 : t('projects.deleteFallback')}
